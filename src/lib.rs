@@ -80,9 +80,12 @@ where
 }
 
 #[cfg(test)]
+#[global_allocator]
+static GLOBAL: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use memory_stats::memory_stats;
     use serde_derive::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -90,17 +93,82 @@ mod tests {
         value: i32,
     }
 
-    fn get_memory_usage() -> usize {
-        memory_stats().map(|stats| stats.virtual_mem).unwrap_or(0)
+    unsafe fn force_arena_trim() {
+        unsafe {
+            libc::malloc_trim(0);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        unsafe {
+            libc::malloc_trim(0);
+        }
+    }
+
+    fn get_rss() -> Option<usize> {
+        // Read the process status file.
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        // Look for the line starting with "VmRSS:"
+        for line in status.lines() {
+            if line.starts_with("VmRSS:") {
+                // Example line: "VmRSS:	  123456 kB"
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(kb) = parts[1].parse::<usize>() {
+                        // Convert kilobytes to bytes.
+                        return Some(kb * 1024);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    use std::fs::read_to_string;
+
+    /// Returns the total amount of private (active) memory in bytes by summing
+    /// the "Private_Clean" and "Private_Dirty" fields from /proc/self/smaps.
+    fn get_active_memory() -> Option<usize> {
+        let smaps = read_to_string("/proc/self/smaps").ok()?;
+        let mut total = 0;
+        for line in smaps.lines() {
+            if line.starts_with("Private_Clean:") || line.starts_with("Private_Dirty:") {
+                // Example line: "Private_Clean:     1024 kB"
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(kb) = parts[1].parse::<usize>() {
+                        total += kb * 1024;
+                    }
+                }
+            }
+        }
+        Some(total)
+    }
+
+    fn get_heap_allocated() -> usize {
+        unsafe {
+            // mallinfo returns a struct mallinfo.
+            let info = libc::mallinfo();
+            // uordblks is the total allocated space (in bytes) in the heap.
+            info.uordblks as usize
+        }
     }
 
     fn leak_memory() -> MyResult {
         // Leak 50MB of memory
+        let mut leaked_memory = 0i32;
         for _ in 0..50 {
-            let leak = Box::new(vec![0u8; 1024 * 1024]); // 1MB
+            let leak_size = 1024 * 1024; // 1MB
+            let mut leak = Box::new(vec![0u8; leak_size]);
+            // Touch one byte per 4KB page to force allocation
+            // TODO: Get page size from the system
+            for i in (0..leak_size).step_by(4096) {
+                leak[i] = 1;
+            }
             Box::leak(leak);
+            leaked_memory += leak_size as i32;
         }
-        MyResult { value: 42 }
+        MyResult {
+            value: leaked_memory,
+        }
     }
 
     #[test]
@@ -111,13 +179,16 @@ mod tests {
 
     #[test]
     fn test_memory_leak_without_isolation() {
-        let initial_memory = get_memory_usage();
+        let initial_memory = get_rss().unwrap_or(0);
 
         // Run the leaky function directly
         leak_memory();
+        unsafe {
+            force_arena_trim();
+        }
 
-        let final_memory = get_memory_usage();
-        let diff = final_memory - initial_memory;
+        let final_memory = get_rss().unwrap_or(0);
+        let diff = final_memory.saturating_sub(initial_memory);
 
         // Virtual memory usage should have increased by roughly 50MB (allowing some variance)
         assert!(
@@ -129,14 +200,15 @@ mod tests {
 
     #[test]
     fn test_memory_leak_with_isolation() {
-        let initial_memory = get_memory_usage();
+        let initial_memory = get_rss().unwrap_or(0);
 
         // Run the leaky function in isolated process
         execute_in_isolated_process(leak_memory);
-        // TODO: Remove me
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        unsafe {
+            force_arena_trim();
+        }
 
-        let final_memory = get_memory_usage();
+        let final_memory = get_rss().unwrap_or(0);
         let diff = final_memory.saturating_sub(initial_memory);
 
         // Virtual memory difference should be minimal (allowing for some small variance)
