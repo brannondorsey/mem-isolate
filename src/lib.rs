@@ -222,31 +222,31 @@ mod tests {
     #[test]
     #[allow(static_mut_refs)]
     fn test_static_memory_mutation_without_isolation() {
-        static mut COUNTER: u32 = 0;
-        let mutate = || unsafe { COUNTER = 42 };
+        static mut MEMORY: bool = false;
+        let mutate = || unsafe { MEMORY = true };
 
         // Directly modify static memory
         mutate();
 
         // Verify the change persists
         unsafe {
-            assert_eq!(COUNTER, 42, "Static memory should be modified");
+            assert!(MEMORY, "Static memory should be modified");
         }
     }
 
     #[test]
     #[allow(static_mut_refs)]
     fn test_static_memory_mutation_with_isolation() {
-        static mut COUNTER: u32 = 0;
-        let mutate = || unsafe { COUNTER = 42 };
+        static mut MEMORY: bool = false;
+        let mutate = || unsafe { MEMORY = true };
 
         // Modify static memory in isolated process
         execute_in_isolated_process(mutate);
 
         // Verify the change does not affect parent process
         unsafe {
-            assert_eq!(
-                COUNTER, 0,
+            assert!(
+                !MEMORY,
                 "Static memory should remain unmodified in parent process"
             );
         }
