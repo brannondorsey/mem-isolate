@@ -177,45 +177,78 @@ mod tests {
         assert_eq!(result, MyResult { value: 42 });
     }
 
+    // #[test]
+    // fn test_memory_leak_without_isolation() {
+    //     let initial_memory = get_rss().unwrap_or(0);
+
+    //     // Run the leaky function directly
+    //     leak_memory();
+    //     unsafe {
+    //         force_arena_trim();
+    //     }
+
+    //     let final_memory = get_rss().unwrap_or(0);
+    //     let diff = final_memory.saturating_sub(initial_memory);
+
+    //     // Virtual memory usage should have increased by roughly 50MB (allowing some variance)
+    //     assert!(
+    //         diff > 45_000_000,
+    //         "Memory leak not detected: diff = {} bytes",
+    //         diff
+    //     );
+    // }
+
+    // #[test]
+    // fn test_memory_leak_with_isolation() {
+    //     let initial_memory = get_rss().unwrap_or(0);
+
+    //     // Run the leaky function in isolated process
+    //     execute_in_isolated_process(leak_memory);
+    //     unsafe {
+    //         force_arena_trim();
+    //     }
+
+    //     let final_memory = get_rss().unwrap_or(0);
+    //     let diff = final_memory.saturating_sub(initial_memory);
+
+    //     // Virtual memory difference should be minimal (allowing for some small variance)
+    //     assert!(
+    //         diff < 45_000_000,
+    //         "Unexpected memory growth: diff = {} bytes",
+    //         diff
+    //     );
+    // }
+
     #[test]
-    fn test_memory_leak_without_isolation() {
-        let initial_memory = get_rss().unwrap_or(0);
+    #[allow(static_mut_refs)]
+    fn test_static_memory_mutation_without_isolation() {
+        static mut COUNTER: u32 = 0;
+        let mutate = || unsafe { COUNTER = 42 };
 
-        // Run the leaky function directly
-        leak_memory();
+        // Directly modify static memory
+        mutate();
+
+        // Verify the change persists
         unsafe {
-            force_arena_trim();
+            assert_eq!(COUNTER, 42, "Static memory should be modified");
         }
-
-        let final_memory = get_rss().unwrap_or(0);
-        let diff = final_memory.saturating_sub(initial_memory);
-
-        // Virtual memory usage should have increased by roughly 50MB (allowing some variance)
-        assert!(
-            diff > 45_000_000,
-            "Memory leak not detected: diff = {} bytes",
-            diff
-        );
     }
 
     #[test]
-    fn test_memory_leak_with_isolation() {
-        let initial_memory = get_rss().unwrap_or(0);
+    #[allow(static_mut_refs)]
+    fn test_static_memory_mutation_with_isolation() {
+        static mut COUNTER: u32 = 0;
+        let mutate = || unsafe { COUNTER = 42 };
 
-        // Run the leaky function in isolated process
-        execute_in_isolated_process(leak_memory);
+        // Modify static memory in isolated process
+        execute_in_isolated_process(mutate);
+
+        // Verify the change does not affect parent process
         unsafe {
-            force_arena_trim();
+            assert_eq!(
+                COUNTER, 0,
+                "Static memory should remain unmodified in parent process"
+            );
         }
-
-        let final_memory = get_rss().unwrap_or(0);
-        let diff = final_memory.saturating_sub(initial_memory);
-
-        // Virtual memory difference should be minimal (allowing for some small variance)
-        assert!(
-            diff < 45_000_000,
-            "Unexpected memory growth: diff = {} bytes",
-            diff
-        );
     }
 }
