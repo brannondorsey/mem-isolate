@@ -41,11 +41,11 @@ where
             // Serialize the result using bincode
             let encoded = bincode::serialize(&result).expect("serialization failed");
             {
+                // The write_fd will automatically be closed when the File is dropped
                 let mut writer = unsafe { File::from_raw_fd(write_fd) };
                 writer.write_all(&encoded).expect("failed to write to pipe");
                 writer.flush().expect("failed to flush pipe");
             }
-            // TODO: Close the write_fd
             // Exit immediately; use _exit to avoid running atexit()/on_exit() handlers
             // and flushing stdio buffers, which are exact clones of the parent in the child process.
             unsafe { libc::_exit(0) };
@@ -67,13 +67,12 @@ where
             // Read from the pipe by wrapping the read fd as a File
             let mut buffer = Vec::new();
             {
+                // The read_fd will automatically be closed when the File is dropped
                 let mut reader = unsafe { File::from_raw_fd(read_fd) };
                 reader
                     .read_to_end(&mut buffer)
                     .expect("failed to read from pipe");
             }
-
-            // TODO: Close the read_fd
             // Deserialize the result and return it
             bincode::deserialize(&buffer).expect("deserialization failed")
         }
