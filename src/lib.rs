@@ -46,7 +46,8 @@ where
                 writer.flush().expect("failed to flush pipe");
             }
             // TODO: Close the write_fd
-            // Exit immediately; use _exit to avoid running destructors
+            // Exit immediately; use _exit to avoid running atexit()/on_exit() handlers
+            // and flushing stdio buffers, which are exact clones of the parent in the child process.
             unsafe { libc::_exit(0) };
         }
         // Parent process
