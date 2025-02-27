@@ -7,6 +7,9 @@ use std::io::{Read, Write};
 use std::os::unix::io::FromRawFd;
 use thiserror::Error;
 
+mod c;
+use c::{_exit, ForkReturn, PipeFds, close, fork, pipe, waitpid};
+
 #[derive(Error, Debug)]
 pub enum MemIsolateError {
     #[error("An error occurred in the parent process")]
@@ -102,49 +105,46 @@ where
     T: Serialize + DeserializeOwned,
 {
     // Create a pipe.
-    let mut pipe_fds: [i32; 2] = [0; 2];
-    if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
-        let err = ParentPlumbingError::PipeCreationFailed(io::Error::last_os_error());
-        let err = ParentError::Plumbing(err);
-        let err = MemIsolateError::Parent(err);
-        return Err(err);
-    }
-    let read_fd = pipe_fds[0];
-    let write_fd = pipe_fds[1];
+    // TODO: Should I use dup2 somewhere here?
+    let PipeFds { read_fd, write_fd } = match pipe() {
+        Ok(pipe_fds) => pipe_fds,
+        Err(err) => {
+            let err = ParentPlumbingError::PipeCreationFailed(err);
+            let err = ParentError::Plumbing(err);
+            let err = MemIsolateError::Parent(err);
+            return Err(err);
+        }
+    };
 
-    const FORK_FAILED: i32 = -1;
-    const FORK_CHILD: i32 = 0;
+    const CHILD_EXIT_HAPPY: i32 = 0;
+    const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 1;
+    const CHILD_EXIT_IF_WRITE_FAILED: i32 = 2;
+
     // TODO: Wrap all libc calls in a safe wrapper function that returns a Result<T, io::Error>
-    let pid = unsafe { libc::fork() };
-    match pid {
-        FORK_FAILED => {
-            let err = ParentPlumbingError::ForkFailed(io::Error::last_os_error());
+    match fork() {
+        Err(err) => {
+            let err = ParentPlumbingError::ForkFailed(err);
             let err = ParentError::Plumbing(err);
             let err = MemIsolateError::Parent(err);
             Err(err)
         }
-        FORK_CHILD => {
+        Ok(ForkReturn::Child) => {
             // NOTE: We chose to panic in the child if we can't communicate an error back to the parent.
             // The parent can then interpret this an an UnexpectedChildDeath.
 
-            const CHILD_EXIT_HAPPY: i32 = 0;
-            const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 1;
-            const CHILD_EXIT_IF_WRITE_FAILED: i32 = 2;
-
             // Close the read end of the pipe
-            if unsafe { libc::close(read_fd) } != 0 {
-                let err = ChildPlumbingError::PipeCloseFailed(io::Error::last_os_error());
+            if let Err(close_err) = close(read_fd) {
+                let err = ChildPlumbingError::PipeCloseFailed(close_err);
                 let encoded = bincode::serialize(&ChildError::Plumbing(err))
                     .expect("failed to serialize the child error");
 
-                unsafe {
-                    let mut writer = File::from_raw_fd(write_fd);
-                    writer
-                        .write_all(&encoded)
-                        .expect("failed to write error to pipe");
-                    writer.flush().expect("failed to flush error to pipe");
-                    libc::_exit(CHILD_EXIT_IF_READ_CLOSE_FAILED);
-                }
+                // TODO: Make sure we uphold the invariant that the write_fd is always open and not shared with anything else.
+                let mut writer = unsafe { File::from_raw_fd(write_fd) };
+                writer
+                    .write_all(&encoded)
+                    .expect("failed to write error to pipe");
+                writer.flush().expect("failed to flush error to pipe");
+                _exit(CHILD_EXIT_IF_READ_CLOSE_FAILED);
             }
 
             // Execute the callable and handle serialization
@@ -165,31 +165,33 @@ where
             if let Err(_err) = write_result {
                 // If we can't write to the pipe, we can't communicate the error either
                 // Parent will detect this as an UnexpectedChildDeath
-                unsafe { libc::_exit(CHILD_EXIT_IF_WRITE_FAILED) };
+                _exit(CHILD_EXIT_IF_WRITE_FAILED);
             }
 
             // Exit immediately; use _exit to avoid running atexit()/on_exit() handlers
             // and flushing stdio buffers, which are exact clones of the parent in the child process.
-            unsafe { libc::_exit(CHILD_EXIT_HAPPY) };
+            _exit(CHILD_EXIT_HAPPY);
         }
-        // FORK_PARENT
-        _ => {
+        Ok(ForkReturn::Parent(child_pid)) => {
             // Close the write end of the pipe
-            if unsafe { libc::close(write_fd) } == -1 {
-                let err = ParentPlumbingError::PipeCloseFailed(io::Error::last_os_error());
+            if let Err(close_err) = close(write_fd) {
+                let err = ParentPlumbingError::PipeCloseFailed(close_err);
                 let err = ParentError::Plumbing(err);
                 let err = MemIsolateError::Parent(err);
                 return Err(err);
             }
 
             // Wait for the child process to exit
-            let mut status: i32 = 0;
-            if unsafe { libc::waitpid(pid, &mut status as *mut i32, 0) } == -1 {
-                let err = ParentPlumbingError::WaitFailed(io::Error::last_os_error());
-                let err = ParentError::Plumbing(err);
-                let err = MemIsolateError::Parent(err);
-                return Err(err);
-            }
+            // TODO: Compare _status to CHILD_EXIT_* and transform the error if necessary
+            let _status = match waitpid(child_pid) {
+                Ok(status) => status,
+                Err(wait_err) => {
+                    let err = ParentPlumbingError::WaitFailed(wait_err);
+                    let err = ParentError::Plumbing(err);
+                    let err = MemIsolateError::Parent(err);
+                    return Err(err);
+                }
+            };
 
             // Read from the pipe by wrapping the read fd as a File
             let mut buffer = Vec::new();
