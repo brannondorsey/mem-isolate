@@ -1,6 +1,34 @@
 # mem-isolate: Run unsafe code safely
 
+`mem-isolate` runs your function via a `fork()`, waits for the result, and returns it. This grants your code access to an exact copy of memory and state at the time just before the call, but gaurantees that the function will not affect the parent process in any way. It forces functions to be pure, even if they aren't.
+
+```rust
+use mem_isolate::execute_in_isolated_process;
+
+// No heap, stack, or program memory out here
+let result = mem_isolate::execute_in_isolated_process(|| {
+    // Can be affected by anything in here
+    unsafe {
+        gnarly_cpp_bindings::potentially_leaking_function();
+        unstable_ffi::segfault_prone_function();
+        heap_fragmenting_operation();
+        something_that_panics_in_a_way_you_could_recover_from();
+    }
+});
+```
+
+Uses:
+
+* Running code with a known memory leak
+* Running code that fragments the heap
+* Running `unsafe` code
+
+## How it works
+
 TODO
+blah blah blah
+
+We call this the "fork and free" pattern.
 
 ## Benchmarks
 
