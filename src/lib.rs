@@ -9,8 +9,7 @@ use c::{_exit, ForkReturn, PipeFds, close, fork, pipe, waitpid};
 
 mod errors;
 use errors::{
-    ChildError, ChildPlumbingError, DeserializationFailed, MemIsolateError, ParentError,
-    ParentPlumbingError, SerializationFailed,
+    CallableDidNotExecuteError, CallableExecutedError, CallableStatusUnknownError, MemIsolateError,
 };
 
 /// Execute `callable` in a forked child process so that any memory changes during do not affect the parent.
@@ -25,15 +24,17 @@ where
     F: FnOnce() -> T,
     T: Serialize + DeserializeOwned,
 {
+    use CallableDidNotExecuteError::*;
+    use CallableExecutedError::*;
+    use CallableStatusUnknownError::*;
+    use MemIsolateError::*;
+
     // Create a pipe.
     // TODO: Should I use dup2 somewhere here?
     let PipeFds { read_fd, write_fd } = match pipe() {
         Ok(pipe_fds) => pipe_fds,
         Err(err) => {
-            let err = ParentPlumbingError::PipeCreationFailed(err);
-            let err = ParentError::Plumbing(err);
-            let err = MemIsolateError::Parent(err);
-            return Err(err);
+            return Err(CallableDidNotExecute(PipeCreationFailed(err)));
         }
     };
 
@@ -43,21 +44,15 @@ where
 
     // TODO: Wrap all libc calls in a safe wrapper function that returns a Result<T, io::Error>
     match fork() {
-        Err(err) => {
-            let err = ParentPlumbingError::ForkFailed(err);
-            let err = ParentError::Plumbing(err);
-            let err = MemIsolateError::Parent(err);
-            Err(err)
-        }
+        Err(err) => Err(CallableDidNotExecute(ForkFailed(err))),
         Ok(ForkReturn::Child) => {
             // NOTE: We chose to panic in the child if we can't communicate an error back to the parent.
             // The parent can then interpret this an an UnexpectedChildDeath.
 
             // Close the read end of the pipe
             if let Err(close_err) = close(read_fd) {
-                let err = ChildPlumbingError::PipeCloseFailed(close_err);
-                let encoded = bincode::serialize(&ChildError::Plumbing(err))
-                    .expect("failed to serialize the child error");
+                let err = CallableDidNotExecute(ChildPipeCloseFailed(close_err));
+                let encoded = bincode::serialize(&err).expect("failed to serialize error");
 
                 // TODO: Make sure we uphold the invariant that the write_fd is always open and not shared with anything else.
                 let mut writer = unsafe { File::from_raw_fd(write_fd) };
@@ -70,11 +65,11 @@ where
 
             // Execute the callable and handle serialization
             let result = callable();
-            let encoded = match bincode::serialize(&Ok::<T, ChildError>(result)) {
+            let encoded = match bincode::serialize(&Ok::<T, MemIsolateError>(result)) {
                 Ok(encoded) => encoded,
                 Err(err) => {
-                    let err = ChildError::Data(SerializationFailed(err));
-                    bincode::serialize(&Err::<T, ChildError>(err))
+                    let err = CallableExecuted(SerializationFailed(err));
+                    bincode::serialize(&Err::<T, MemIsolateError>(err))
                         .expect("failed to serialize error")
                 }
             };
@@ -96,10 +91,7 @@ where
         Ok(ForkReturn::Parent(child_pid)) => {
             // Close the write end of the pipe
             if let Err(close_err) = close(write_fd) {
-                let err = ParentPlumbingError::PipeCloseFailed(close_err);
-                let err = ParentError::Plumbing(err);
-                let err = MemIsolateError::Parent(err);
-                return Err(err);
+                return Err(CallableStatusUnknown(ParentPipeCloseFailed(close_err)));
             }
 
             // Wait for the child process to exit
@@ -107,10 +99,7 @@ where
             let _status = match waitpid(child_pid) {
                 Ok(status) => status,
                 Err(wait_err) => {
-                    let err = ParentPlumbingError::WaitFailed(wait_err);
-                    let err = ParentError::Plumbing(err);
-                    let err = MemIsolateError::Parent(err);
-                    return Err(err);
+                    return Err(CallableStatusUnknown(WaitFailed(wait_err)));
                 }
             };
 
@@ -119,29 +108,19 @@ where
             {
                 let mut reader = unsafe { File::from_raw_fd(read_fd) };
                 if let Err(err) = reader.read_to_end(&mut buffer) {
-                    let err = ParentPlumbingError::PipeReadFailed(err);
-                    let err = ParentError::Plumbing(err);
-                    let err = MemIsolateError::Parent(err);
-                    return Err(err);
+                    return Err(CallableStatusUnknown(ParentPipeReadFailed(err)));
                 }
             } // The read_fd will automatically be closed when the File is dropped
 
             if buffer.is_empty() {
-                // TODO: #1 make this a child error
-                // TODO: #2 On second thought, maybe we should frame errors more from the perspective of the caller instead of the implementation.
-                // For instance, maybe we have FunctionDidNotRunError(Reason), FunctionRanError(Reason), and FunctionPanickedError().
-                let err = ParentError::Plumbing(ParentPlumbingError::UnexpectedChildDeath);
-                let err = MemIsolateError::Parent(err);
-                return Err(err);
+                // TODO: How can we more rigerously know this? Maybe we write to a mem map before and after execution?
+                return Err(CallableStatusUnknown(CallableProcessDiedDuringExecution));
             }
             // Update the deserialization to handle child errors
-            match bincode::deserialize::<Result<T, ChildError>>(&buffer) {
+            match bincode::deserialize::<Result<T, MemIsolateError>>(&buffer) {
                 Ok(Ok(result)) => Ok(result),
-                Ok(Err(err)) => Err(MemIsolateError::Child(err)),
-                Err(err) => {
-                    let err = ParentError::Data(DeserializationFailed(err));
-                    Err(MemIsolateError::Parent(err))
-                }
+                Ok(Err(err)) => Err(err),
+                Err(err) => Err(CallableExecuted(DeserializationFailed(err))),
             }
         }
     }
