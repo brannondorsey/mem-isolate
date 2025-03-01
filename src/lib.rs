@@ -151,7 +151,6 @@ mod tests {
     }
 
     // TODO: Add test for memory leaks with Box::leak(). My first attempt at this proved challenging only in the detection mechanism.
-    // TODO: Add tests for all three closure types + fn pointers.
 
     #[test]
     fn simple_example() {
@@ -190,5 +189,43 @@ mod tests {
                 "Static memory should remain unmodified in parent process"
             );
         }
+    }
+
+    #[test]
+    fn test_all_function_types() {
+        // 1. Function pointer (simplest, most explicit)
+        fn function_pointer() -> MyResult {
+            MyResult { value: 42 }
+        }
+        let result = execute_in_isolated_process(function_pointer).unwrap();
+        assert_eq!(result, MyResult { value: 42 });
+
+        // 2. Fn closure (immutable captures, can be called multiple times)
+        let fn_closure = || MyResult { value: 42 };
+        let result = execute_in_isolated_process(fn_closure).unwrap();
+        assert_eq!(result, MyResult { value: 42 });
+
+        // 3. FnMut closure (mutable captures, can be called multiple times)
+        let mut counter = 0;
+        let fn_mut_closure = || {
+            counter += 1;
+            MyResult { value: counter }
+        };
+        let result = execute_in_isolated_process(fn_mut_closure).unwrap();
+        assert_eq!(result, MyResult { value: 1 });
+        // WARNING: This zero is a surprising result if you don't understand that
+        // the closure is called in a new process. This is the whole point of mem-isolate.
+        assert_eq!(counter, 0);
+
+        // 4. FnOnce closure (consumes captures, can only be called once)
+        let value = String::from("hello");
+        let fn_once_closure = move || {
+            // This closure takes ownership of value
+            MyResult {
+                value: value.len() as i32,
+            }
+        };
+        let result = execute_in_isolated_process(fn_once_closure).unwrap();
+        assert_eq!(result, MyResult { value: 5 });
     }
 }
