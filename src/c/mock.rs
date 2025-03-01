@@ -61,7 +61,7 @@ impl SystemFunctions for RealSystemFunctions {
     }
 }
 
-// Type for representing the mock result
+// Type for representing a mock result
 #[derive(Clone)]
 enum MockResult<T> {
     Ok(T),
@@ -92,23 +92,87 @@ impl<T> MockResult<T> {
     }
 }
 
+/// Defines how a call should be implemented - real or mocked
+#[derive(Clone)]
+enum CallImplementation<T> {
+    Real,                // Use real implementation
+    Mock(MockResult<T>), // Use mocked result
+}
+
+/// Public API for specifying call behavior
+pub enum CallBehavior<T> {
+    Real,                       // Use the real system implementation
+    Mock(Result<T, io::Error>), // Use a mock result
+}
+
+/// A generic queue of call implementations
+#[derive(Clone)]
+struct CallQueue<T> {
+    queue: RefCell<VecDeque<CallImplementation<T>>>,
+    name: &'static str, // For better error messages
+}
+
+impl<T: Clone> CallQueue<T> {
+    fn new(name: &'static str) -> Self {
+        Self {
+            queue: RefCell::new(VecDeque::new()),
+            name,
+        }
+    }
+
+    fn push(&self, behavior: CallBehavior<T>) {
+        let mut queue = self.queue.borrow_mut();
+        match behavior {
+            CallBehavior::Real => queue.push_back(CallImplementation::Real),
+            CallBehavior::Mock(result) => {
+                queue.push_back(CallImplementation::Mock(MockResult::from_result(result)))
+            }
+        }
+    }
+
+    fn next<F>(&self, real_impl: F, fallback_enabled: bool) -> Result<T, io::Error>
+    where
+        F: FnOnce() -> Result<T, io::Error>,
+    {
+        // Get explicit reference to make the borrow checker happy
+        let mut queue = self.queue.borrow_mut();
+        match queue.pop_front() {
+            Some(CallImplementation::Real) => real_impl(),
+            Some(CallImplementation::Mock(result)) => result.to_result(),
+            None if fallback_enabled => real_impl(),
+            None => panic!(
+                "No mock behavior configured for {}() and fallback is disabled",
+                self.name
+            ),
+        }
+    }
+}
+
 /// Mock implementation that returns predefined values
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct MockSystemFunctions {
-    // Add a fallback mode flag
     fallback_enabled: Cell<bool>,
-    fork_results: RefCell<VecDeque<MockResult<ForkReturn>>>,
-    pipe_results: RefCell<VecDeque<MockResult<PipeFds>>>,
-    close_results: RefCell<VecDeque<MockResult<()>>>,
-    waitpid_results: RefCell<VecDeque<MockResult<c_int>>>,
+    fork_queue: CallQueue<ForkReturn>,
+    pipe_queue: CallQueue<PipeFds>,
+    close_queue: CallQueue<()>,
+    waitpid_queue: CallQueue<c_int>,
+}
+
+impl Default for MockSystemFunctions {
+    fn default() -> Self {
+        Self {
+            fallback_enabled: Cell::new(true), // Enable fallback by default
+            fork_queue: CallQueue::new("fork"),
+            pipe_queue: CallQueue::new("pipe"),
+            close_queue: CallQueue::new("close"),
+            waitpid_queue: CallQueue::new("waitpid"),
+        }
+    }
 }
 
 impl MockSystemFunctions {
     pub fn new() -> Self {
-        let instance = Self::default();
-        // Enable fallback by default for a better user experience
-        instance.enable_fallback();
-        instance
+        Self::default()
     }
 
     /// Enable fallback to real implementations when no mock is configured
@@ -128,88 +192,84 @@ impl MockSystemFunctions {
         self.fallback_enabled.get()
     }
 
-    pub fn expect_fork(&self, result: Result<ForkReturn, io::Error>) -> &Self {
-        self.fork_results
-            .borrow_mut()
-            .push_back(MockResult::from_result(result));
+    // Generic methods for specifying behavior
+
+    pub fn expect_fork(&self, behavior: CallBehavior<ForkReturn>) -> &Self {
+        self.fork_queue.push(behavior);
         self
     }
 
-    pub fn expect_pipe(&self, result: Result<PipeFds, io::Error>) -> &Self {
-        self.pipe_results
-            .borrow_mut()
-            .push_back(MockResult::from_result(result));
+    pub fn expect_pipe(&self, behavior: CallBehavior<PipeFds>) -> &Self {
+        self.pipe_queue.push(behavior);
         self
     }
 
-    pub fn expect_close(&self, result: Result<(), io::Error>) -> &Self {
-        self.close_results
-            .borrow_mut()
-            .push_back(MockResult::from_result(result));
+    pub fn expect_close(&self, behavior: CallBehavior<()>) -> &Self {
+        self.close_queue.push(behavior);
         self
     }
 
-    pub fn expect_waitpid(&self, result: Result<c_int, io::Error>) -> &Self {
-        self.waitpid_results
-            .borrow_mut()
-            .push_back(MockResult::from_result(result));
+    pub fn expect_waitpid(&self, behavior: CallBehavior<c_int>) -> &Self {
+        self.waitpid_queue.push(behavior);
         self
+    }
+
+    // Convenience methods for better readability
+
+    pub fn expect_real_fork(&self) -> &Self {
+        self.expect_fork(CallBehavior::Real)
+    }
+
+    pub fn expect_mock_fork(&self, result: Result<ForkReturn, io::Error>) -> &Self {
+        self.expect_fork(CallBehavior::Mock(result))
+    }
+
+    pub fn expect_real_pipe(&self) -> &Self {
+        self.expect_pipe(CallBehavior::Real)
+    }
+
+    pub fn expect_mock_pipe(&self, result: Result<PipeFds, io::Error>) -> &Self {
+        self.expect_pipe(CallBehavior::Mock(result))
+    }
+
+    pub fn expect_real_close(&self) -> &Self {
+        self.expect_close(CallBehavior::Real)
+    }
+
+    pub fn expect_mock_close(&self, result: Result<(), io::Error>) -> &Self {
+        self.expect_close(CallBehavior::Mock(result))
+    }
+
+    pub fn expect_real_waitpid(&self) -> &Self {
+        self.expect_waitpid(CallBehavior::Real)
+    }
+
+    pub fn expect_mock_waitpid(&self, result: Result<c_int, io::Error>) -> &Self {
+        self.expect_waitpid(CallBehavior::Mock(result))
     }
 }
 
-// TODO: Make these generic
 impl SystemFunctions for MockSystemFunctions {
     fn fork(&self) -> Result<ForkReturn, io::Error> {
-        match self.fork_results.borrow_mut().pop_front() {
-            Some(result) => result.to_result(),
-            None if self.is_fallback_enabled() => {
-                // Fall back to real implementation when fallback is enabled
-                RealSystemFunctions.fork()
-            }
-            None => {
-                // Strict mode - panic when no mock is configured
-                panic!("No mock result configured for fork() and fallback is disabled")
-            }
-        }
+        self.fork_queue
+            .next(|| RealSystemFunctions.fork(), self.is_fallback_enabled())
     }
 
     fn pipe(&self) -> Result<PipeFds, io::Error> {
-        match self.pipe_results.borrow_mut().pop_front() {
-            Some(result) => result.to_result(),
-            None if self.is_fallback_enabled() => {
-                // Fall back to real implementation
-                RealSystemFunctions.pipe()
-            }
-            None => {
-                panic!("No mock result configured for pipe() and fallback is disabled")
-            }
-        }
+        self.pipe_queue
+            .next(|| RealSystemFunctions.pipe(), self.is_fallback_enabled())
     }
 
     fn close(&self, fd: c_int) -> Result<(), io::Error> {
-        match self.close_results.borrow_mut().pop_front() {
-            Some(result) => result.to_result(),
-            None if self.is_fallback_enabled() => {
-                // Fall back to real implementation
-                RealSystemFunctions.close(fd)
-            }
-            None => {
-                panic!("No mock result configured for close() and fallback is disabled")
-            }
-        }
+        self.close_queue
+            .next(|| RealSystemFunctions.close(fd), self.is_fallback_enabled())
     }
 
     fn waitpid(&self, pid: c_int) -> Result<c_int, io::Error> {
-        match self.waitpid_results.borrow_mut().pop_front() {
-            Some(result) => result.to_result(),
-            None if self.is_fallback_enabled() => {
-                // Fall back to real implementation
-                RealSystemFunctions.waitpid(pid)
-            }
-            None => {
-                panic!("No mock result configured for waitpid() and fallback is disabled")
-            }
-        }
+        self.waitpid_queue.next(
+            || RealSystemFunctions.waitpid(pid),
+            self.is_fallback_enabled(),
+        )
     }
 }
 
@@ -240,18 +300,47 @@ pub fn is_mocking_enabled() -> bool {
     IS_MOCKING.with(|m| m.get())
 }
 
-/// Set up mocking environment and execute a test function with the configured mock
-pub fn with_mock_system<F, R>(test_fn: F) -> R
-where
-    F: FnOnce(&MockSystemFunctions) -> R,
-{
+/// Configuration options for the mock system
+pub enum MockConfig {
+    /// Use fallback mode (real implementations when no mock is configured)
+    Fallback,
+
+    /// Use strict mode (panic when no mock is configured)
+    Strict,
+
+    /// Configure the mock with a function, using fallback mode
+    ConfiguredWithFallback(Box<dyn FnOnce(&MockSystemFunctions)>),
+
+    /// Configure the mock with a function, using strict mode
+    ConfiguredStrict(Box<dyn FnOnce(&MockSystemFunctions)>),
+}
+
+/// Set up mocking environment and execute a test function
+pub fn with_mock_system<R>(config: MockConfig, test_fn: impl FnOnce() -> R) -> R {
     let mock = MockSystemFunctions::new();
 
-    // Enable mocking with our mock
-    enable_mocking(mock.clone());
+    // Configure based on the enum variant
+    match config {
+        MockConfig::Fallback => {
+            // Use defaults (fallback enabled)
+        }
+        MockConfig::Strict => {
+            mock.disable_fallback();
+        }
+        MockConfig::ConfiguredWithFallback(configure_fn) => {
+            configure_fn(&mock);
+        }
+        MockConfig::ConfiguredStrict(configure_fn) => {
+            mock.disable_fallback();
+            configure_fn(&mock);
+        }
+    }
 
-    // Run the test
-    let result = test_fn(&mock);
+    // Enable mocking with the configured mock
+    enable_mocking(mock);
+
+    // Run the test function with mocking enabled
+    let result = test_fn();
 
     // Disable mocking
     disable_mocking();
@@ -290,9 +379,18 @@ pub fn _exit(status: c_int) -> ! {
     }
 }
 
-// Add a helper function to easily create a mock with strict behavior
-pub fn strict_mock() -> MockSystemFunctions {
-    let mock = MockSystemFunctions::new();
-    mock.disable_fallback();
-    mock
+/// Helper to create a ConfiguredWithFallback variant
+pub fn configured_with_fallback<F>(configure_fn: F) -> MockConfig
+where
+    F: FnOnce(&MockSystemFunctions) + 'static,
+{
+    MockConfig::ConfiguredWithFallback(Box::new(configure_fn))
+}
+
+/// Helper to create a ConfiguredStrict variant
+pub fn configured_strict<F>(configure_fn: F) -> MockConfig
+where
+    F: FnOnce(&MockSystemFunctions) + 'static,
+{
+    MockConfig::ConfiguredStrict(Box::new(configure_fn))
 }

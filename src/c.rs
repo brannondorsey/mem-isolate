@@ -104,9 +104,9 @@ mod tests {
         // Verify mocking is disabled before the block
         assert!(!is_mocking_enabled());
 
-        // Use the helper function
-        with_mock_system(|_mock| {
-            // Verify mocking is enabled inside the block
+        // Use the helper function with default configuration
+        with_mock_system(MockConfig::Fallback, || {
+            // Test function
             assert!(is_mocking_enabled());
         });
 
@@ -118,9 +118,9 @@ mod tests {
     fn test_fork_mocking() {
         let mock = MockSystemFunctions::new();
         // Set up parent process return
-        mock.expect_fork(Ok(ForkReturn::Parent(123)));
+        mock.expect_mock_fork(Ok(ForkReturn::Parent(123)));
         // Also test child process return
-        mock.expect_fork(Ok(ForkReturn::Child));
+        mock.expect_mock_fork(Ok(ForkReturn::Child));
 
         enable_mocking(mock);
 
@@ -136,34 +136,33 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // TODO: Fix this test
     fn test_pipe_mocking() {
-        // Use the with_mock_system helper to ensure proper cleanup
-        with_mock_system(|mock| {
-            mock.expect_pipe(Ok(PipeFds {
-                read_fd: 10,
-                write_fd: 11,
-            }));
+        with_mock_system(
+            configured_with_fallback(|mock| {
+                mock.expect_mock_pipe(Ok(PipeFds {
+                    read_fd: 10,
+                    write_fd: 11,
+                }))
+                .expect_mock_close(Ok(()))
+                .expect_mock_close(Ok(()));
+            }),
+            || {
+                // Test function
+                let pipe_fds = pipe().expect("Pipe should succeed");
+                assert_eq!(pipe_fds.read_fd, 10);
+                assert_eq!(pipe_fds.write_fd, 11);
 
-            // Add expectations for closing both file descriptors
-            mock.expect_close(Ok(()));
-            mock.expect_close(Ok(()));
-
-            let pipe_fds = pipe().expect("Pipe should succeed");
-            assert_eq!(pipe_fds.read_fd, 10);
-            assert_eq!(pipe_fds.write_fd, 11);
-
-            // Close the file descriptors to prevent the IO safety violation
-            close(pipe_fds.read_fd).expect("Close should succeed");
-            close(pipe_fds.write_fd).expect("Close should succeed");
-        });
-        // The with_mock_system helper will automatically disable mocking
+                // Close the file descriptors
+                close(pipe_fds.read_fd).expect("Close should succeed");
+                close(pipe_fds.write_fd).expect("Close should succeed");
+            },
+        );
     }
 
     #[test]
     fn test_close_mocking() {
         let mock = MockSystemFunctions::new();
-        mock.expect_close(Ok(()));
+        mock.expect_mock_close(Ok(()));
 
         enable_mocking(mock);
 
@@ -176,7 +175,7 @@ mod tests {
     #[test]
     fn test_waitpid_mocking() {
         let mock = MockSystemFunctions::new();
-        mock.expect_waitpid(Ok(42)); // Mock an exit status of 42
+        mock.expect_mock_waitpid(Ok(42)); // Mock an exit status of 42
 
         enable_mocking(mock);
 
@@ -191,10 +190,10 @@ mod tests {
         let mock = MockSystemFunctions::new();
 
         // Set up various error conditions
-        mock.expect_fork(Err(io::Error::from_raw_os_error(libc::EAGAIN)));
-        mock.expect_pipe(Err(io::Error::from_raw_os_error(libc::EMFILE)));
-        mock.expect_close(Err(io::Error::from_raw_os_error(libc::EBADF)));
-        mock.expect_waitpid(Err(io::Error::from_raw_os_error(libc::ECHILD)));
+        mock.expect_mock_fork(Err(io::Error::from_raw_os_error(libc::EAGAIN)));
+        mock.expect_mock_pipe(Err(io::Error::from_raw_os_error(libc::EMFILE)));
+        mock.expect_mock_close(Err(io::Error::from_raw_os_error(libc::EBADF)));
+        mock.expect_mock_waitpid(Err(io::Error::from_raw_os_error(libc::ECHILD)));
 
         enable_mocking(mock);
 
@@ -225,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "No mock result configured for fork()")]
+    #[should_panic(expected = "No mock behavior configured for fork()")]
     fn test_missing_fork_expectation() {
         let mock = MockSystemFunctions::new();
         mock.disable_fallback();
@@ -239,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "No mock result configured for pipe()")]
+    #[should_panic(expected = "No mock behavior configured for pipe()")]
     fn test_missing_pipe_expectation() {
         let mock = MockSystemFunctions::new();
         mock.disable_fallback();
@@ -251,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "No mock result configured for close()")]
+    #[should_panic(expected = "No mock behavior configured for close()")]
     fn test_missing_close_expectation() {
         let mock = MockSystemFunctions::new();
         mock.disable_fallback();
@@ -263,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "No mock result configured for waitpid()")]
+    #[should_panic(expected = "No mock behavior configured for waitpid()")]
     fn test_missing_waitpid_expectation() {
         let mock = MockSystemFunctions::new();
         mock.disable_fallback();
@@ -292,9 +291,9 @@ mod tests {
         let mock = MockSystemFunctions::new();
 
         // Set up a sequence of expectations
-        mock.expect_fork(Ok(ForkReturn::Parent(1)));
-        mock.expect_fork(Ok(ForkReturn::Parent(2)));
-        mock.expect_fork(Ok(ForkReturn::Parent(3)));
+        mock.expect_mock_fork(Ok(ForkReturn::Parent(1)))
+            .expect_mock_fork(Ok(ForkReturn::Parent(2)))
+            .expect_mock_fork(Ok(ForkReturn::Parent(3)));
 
         enable_mocking(mock);
 
@@ -314,7 +313,7 @@ mod tests {
         let mock = MockSystemFunctions::new();
 
         // For MockResult::from_result, this should convert to EIO
-        mock.expect_fork(Err(custom_error));
+        mock.expect_mock_fork(Err(custom_error));
 
         enable_mocking(mock);
 
@@ -324,5 +323,30 @@ mod tests {
         assert_eq!(result.unwrap_err().raw_os_error(), Some(libc::EIO));
 
         disable_mocking();
+    }
+
+    #[test]
+    fn test_mixed_real_and_mock_calls() {
+        with_mock_system(
+            configured_with_fallback(|mock| {
+                // Configure a mix of real and mock calls
+                mock.expect_real_fork()
+                    .expect_mock_fork(Ok(ForkReturn::Parent(123)))
+                    .expect_real_fork();
+            }),
+            || {
+                // Test function with the configured mock
+                println!("First call: Real implementation");
+                let _result1 = fork();
+
+                println!("Second call: Mock implementation");
+                let result2 = fork().expect("Mock fork should succeed");
+                println!("Got result2: {:?}", result2);
+                assert_eq!(result2, ForkReturn::Parent(123));
+
+                println!("Third call: Real implementation");
+                let _result3 = fork();
+            },
+        );
     }
 }

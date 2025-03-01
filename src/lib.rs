@@ -144,7 +144,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::c::{is_mocking_enabled, with_mock_system};
+    use crate::c::{MockConfig, is_mocking_enabled, with_mock_system};
     use serde_derive::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -233,10 +233,10 @@ mod tests {
 
     #[test]
     fn test_with_mock_helper() {
-        with_mock_system(|mock| {
-            // TODO: Move to their own tests in mock.rs (or c.rs)
+        with_mock_system(MockConfig::Fallback, || {
+            // Test with active mocking
+            // Check that mocking is properly configured
             assert!(is_mocking_enabled());
-            assert!(mock.is_fallback_enabled());
 
             // Test code that uses mocked functions
             let result = execute_in_isolated_process(|| MyResult { value: 42 }).unwrap();
