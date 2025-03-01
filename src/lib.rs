@@ -87,6 +87,7 @@ where
             // Exit immediately; use _exit to avoid running atexit()/on_exit() handlers
             // and flushing stdio buffers, which are exact clones of the parent in the child process.
             _exit(CHILD_EXIT_HAPPY);
+            // The code after _exit is unreachable because _exit never returns
         }
         Ok(ForkReturn::Parent(child_pid)) => {
             // Close the write end of the pipe
@@ -143,6 +144,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::c::{is_mocking_enabled, with_mock_system};
     use serde_derive::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -227,5 +229,21 @@ mod tests {
         };
         let result = execute_in_isolated_process(fn_once_closure).unwrap();
         assert_eq!(result, MyResult { value: 5 });
+    }
+
+    #[test]
+    fn test_with_mock_helper() {
+        with_mock_system(|mock| {
+            // TODO: Move to their own tests in mock.rs (or c.rs)
+            assert!(is_mocking_enabled());
+            assert!(mock.is_fallback_enabled());
+
+            // Test code that uses mocked functions
+            let result = execute_in_isolated_process(|| MyResult { value: 42 }).unwrap();
+            assert_eq!(result, MyResult { value: 42 });
+        });
+
+        // After with_mock_system, mocking is disabled automatically
+        assert!(!is_mocking_enabled());
     }
 }
