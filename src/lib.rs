@@ -38,11 +38,11 @@ where
         }
     };
 
+    // Statuses 3-63 are normally fair game
     const CHILD_EXIT_HAPPY: i32 = 0;
-    const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 1;
-    const CHILD_EXIT_IF_WRITE_FAILED: i32 = 2;
+    const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 3;
+    const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
 
-    // TODO: Wrap all libc calls in a safe wrapper function that returns a Result<T, io::Error>
     match fork() {
         Err(err) => Err(CallableDidNotExecute(ForkFailed(err))),
         Ok(ForkReturn::Child) => {
@@ -51,7 +51,7 @@ where
 
             // Close the read end of the pipe
             if let Err(close_err) = close(read_fd) {
-                let err = CallableDidNotExecute(ChildPipeCloseFailed(close_err));
+                let err = CallableDidNotExecute(ChildPipeCloseFailed(Some(close_err)));
                 let encoded = bincode::serialize(&err).expect("failed to serialize error");
 
                 // TODO: Make sure we uphold the invariant that the write_fd is always open and not shared with anything else.
@@ -95,13 +95,27 @@ where
             }
 
             // Wait for the child process to exit
-            // TODO: Compare _status to CHILD_EXIT_* and transform the error if necessary
-            let _status = match waitpid(child_pid) {
+            let status = match waitpid(child_pid) {
                 Ok(status) => status,
                 Err(wait_err) => {
                     return Err(CallableStatusUnknown(WaitFailed(wait_err)));
                 }
             };
+
+            match status {
+                CHILD_EXIT_HAPPY => {}
+                CHILD_EXIT_IF_READ_CLOSE_FAILED => {
+                    return Err(CallableDidNotExecute(ChildPipeCloseFailed(None)));
+                }
+                CHILD_EXIT_IF_WRITE_FAILED => {
+                    return Err(CallableExecuted(ChildPipeWriteFailed(None)));
+                }
+                unhandled_status => {
+                    return Err(CallableStatusUnknown(UnexpectedChildExitStatus(
+                        unhandled_status,
+                    )));
+                }
+            }
 
             // Read from the pipe by wrapping the read fd as a File
             let mut buffer = Vec::new();
