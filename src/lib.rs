@@ -8,9 +8,8 @@ mod c;
 use c::{ForkReturn, PipeFds, SystemFunctions};
 
 mod errors;
-use errors::{
-    CallableDidNotExecuteError, CallableExecutedError, CallableStatusUnknownError, MemIsolateError,
-};
+pub use errors::MemIsolateError;
+use errors::{CallableDidNotExecuteError, CallableExecutedError, CallableStatusUnknownError};
 
 /// Execute `callable` in a forked child process so that any memory changes during do not affect the parent.
 /// The child serializes its result (using bincode) and writes it through a pipe, which the parent reads and deserializes.
@@ -21,6 +20,7 @@ use errors::{
 // TODO: Benchmark nicing the child process.
 pub fn execute_in_isolated_process<F, T>(callable: F) -> Result<T, MemIsolateError>
 where
+    // TODO: Consider restricting to disallow FnMut() closures
     F: FnOnce() -> T,
     T: Serialize + DeserializeOwned,
 {
@@ -34,7 +34,13 @@ where
     let sys = c::RealSystemFunctions;
 
     #[cfg(test)]
-    let sys = c::mock::MockableSystemFunctions::with_fallback();
+    let sys = if c::mock::is_mocking_enabled() {
+        // Use the mock from thread-local storage
+        c::mock::get_current_mock()
+    } else {
+        // Create a new fallback mock if no mock is active
+        c::mock::MockableSystemFunctions::with_fallback()
+    };
 
     // Create a pipe.
     // TODO: Should I use dup2 somewhere here?
@@ -153,8 +159,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::c::mock::{MockConfig, is_mocking_enabled, with_mock_system};
+    use crate::c::mock::{
+        CallBehavior, MockConfig, configured_strict, is_mocking_enabled, with_mock_system,
+    };
     use serde::{Deserialize, Serialize};
+    use std::io;
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct MyResult {
@@ -254,5 +263,35 @@ mod tests {
 
         // After with_mock_system, mocking is disabled automatically
         assert!(!is_mocking_enabled());
+    }
+
+    #[test]
+    fn test_pipe_error() {
+        use std::error::Error;
+        with_mock_system(
+            configured_strict(|mock| {
+                let pipe_creation_error = io::Error::from_raw_os_error(libc::ENFILE);
+                mock.expect_pipe(CallBehavior::Mock(Err(pipe_creation_error)));
+            }),
+            |_| {
+                let result = execute_in_isolated_process(|| MyResult { value: 42 });
+                println!("result: {:?}", result);
+                assert!(is_mocking_enabled());
+                assert!(result.is_err());
+                let err = result.unwrap_err();
+                matches!(
+                    err,
+                    MemIsolateError::CallableDidNotExecute(
+                        CallableDidNotExecuteError::PipeCreationFailed(_)
+                    )
+                );
+
+                let pipe_creation_error = io::Error::from_raw_os_error(libc::ENFILE);
+                assert_eq!(
+                    err.source().unwrap().source().unwrap().to_string(),
+                    pipe_creation_error.to_string()
+                );
+            },
+        );
     }
 }

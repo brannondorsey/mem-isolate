@@ -230,6 +230,15 @@ pub fn is_mocking_enabled() -> bool {
     IS_MOCKING_ENABLED.with(|e| e.get())
 }
 
+/// Get the current mock from thread-local storage
+pub fn get_current_mock() -> MockableSystemFunctions {
+    CURRENT_MOCK.with(|m| {
+        m.borrow()
+            .clone()
+            .expect("No mock available in thread-local storage")
+    })
+}
+
 /// Configuration options for the mock system
 pub enum MockConfig {
     /// Use fallback mode (real implementations when no mock is configured)

@@ -11,8 +11,9 @@ use thiserror::Error;
 pub enum MemIsolateError {
     #[error("an error occurred after the callable was executed")]
     CallableExecuted(CallableExecutedError),
+    // TODO: Sourcify all errors
     #[error("an error occurred before the callable was executed")]
-    CallableDidNotExecute(CallableDidNotExecuteError),
+    CallableDidNotExecute(#[source] CallableDidNotExecuteError),
     #[error("the callable process exited with an unknown status")]
     CallableStatusUnknown(CallableStatusUnknownError),
 }
@@ -54,7 +55,7 @@ pub enum CallableDidNotExecuteError {
     #[error(
         "system error encountered creating the pipe used to communicate with the child process"
     )]
-    PipeCreationFailed(io::Error),
+    PipeCreationFailed(#[source] io::Error),
     #[serde(
         serialize_with = "serialize_option_os_error",
         deserialize_with = "deserialize_option_os_error"
