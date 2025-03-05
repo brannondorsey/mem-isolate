@@ -253,7 +253,6 @@ dependencies = [
  "criterion",
  "libc",
  "serde",
- "serde_derive",
  "thiserror",
 ]
 
