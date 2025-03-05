@@ -103,6 +103,8 @@ where
             }
 
             // Wait for the child process to exit
+            // TODO: waitpid doesn't return the exit status you expect it to.
+            // See the Linux Programming Interface book for more details.
             let status = match sys.waitpid(child_pid) {
                 Ok(status) => status,
                 Err(wait_err) => {
