@@ -1,65 +1,9 @@
-use crate::c::{ForkReturn, PipeFds};
+use crate::c::{ForkReturn, PipeFds, RealSystemFunctions, SystemFunctions};
 use libc::c_int;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::io;
 use std::thread_local;
-
-/// Trait defining all system functions that can be mocked
-pub trait SystemFunctions {
-    fn fork(&self) -> Result<ForkReturn, io::Error>;
-    fn pipe(&self) -> Result<PipeFds, io::Error>;
-    fn close(&self, fd: c_int) -> Result<(), io::Error>;
-    fn waitpid(&self, pid: c_int) -> Result<c_int, io::Error>;
-    // Note: _exit is not included as it's a ! function and would complicate testing
-}
-
-/// Real implementation that delegates to actual system calls
-pub struct RealSystemFunctions;
-
-impl SystemFunctions for RealSystemFunctions {
-    fn fork(&self) -> Result<ForkReturn, io::Error> {
-        // Call the actual implementation
-        let ret = unsafe { libc::fork() };
-        match ret {
-            -1 => Err(io::Error::last_os_error()),
-            0 => Ok(ForkReturn::Child),
-            _ => Ok(ForkReturn::Parent(ret)),
-        }
-    }
-
-    fn pipe(&self) -> Result<PipeFds, io::Error> {
-        let mut pipe_fds: [c_int; 2] = [0; 2];
-        let ret = unsafe { libc::pipe(pipe_fds.as_mut_ptr()) };
-        if ret == -1 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(PipeFds {
-                read_fd: pipe_fds[0],
-                write_fd: pipe_fds[1],
-            })
-        }
-    }
-
-    fn close(&self, fd: c_int) -> Result<(), io::Error> {
-        let ret = unsafe { libc::close(fd) };
-        if ret == -1 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(())
-        }
-    }
-
-    fn waitpid(&self, pid: c_int) -> Result<c_int, io::Error> {
-        let mut status: c_int = 0;
-        let ret = unsafe { libc::waitpid(pid, &mut status as *mut c_int, 0) };
-        if ret == -1 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(status)
-        }
-    }
-}
 
 // Type for representing a mock result
 #[derive(Clone)]
@@ -130,7 +74,7 @@ impl<T: Clone> CallQueue<T> {
         }
     }
 
-    fn next<F>(&self, real_impl: F, fallback_enabled: bool) -> Result<T, io::Error>
+    fn execute_next<F>(&self, real_impl: F, fallback_enabled: bool) -> Result<T, io::Error>
     where
         F: FnOnce() -> Result<T, io::Error>,
     {
@@ -148,9 +92,10 @@ impl<T: Clone> CallQueue<T> {
     }
 }
 
-/// Mock implementation that returns predefined values
+/// Mock implementation that returns predefined values and can fall back to real implementation
 #[derive(Clone)]
-pub struct MockSystemFunctions {
+pub struct MockableSystemFunctions {
+    real_impl: RealSystemFunctions,
     fallback_enabled: Cell<bool>,
     fork_queue: CallQueue<ForkReturn>,
     pipe_queue: CallQueue<PipeFds>,
@@ -158,9 +103,10 @@ pub struct MockSystemFunctions {
     waitpid_queue: CallQueue<c_int>,
 }
 
-impl Default for MockSystemFunctions {
+impl Default for MockableSystemFunctions {
     fn default() -> Self {
         Self {
+            real_impl: RealSystemFunctions,
             fallback_enabled: Cell::new(true), // Enable fallback by default
             fork_queue: CallQueue::new("fork"),
             pipe_queue: CallQueue::new("pipe"),
@@ -170,7 +116,7 @@ impl Default for MockSystemFunctions {
     }
 }
 
-impl MockSystemFunctions {
+impl MockableSystemFunctions {
     pub fn new() -> Self {
         Self::default()
     }
@@ -213,91 +159,74 @@ impl MockSystemFunctions {
         self.waitpid_queue.push(behavior);
         self
     }
-
-    // Convenience methods for better readability
-
-    pub fn expect_real_fork(&self) -> &Self {
-        self.expect_fork(CallBehavior::Real)
-    }
-
-    pub fn expect_mock_fork(&self, result: Result<ForkReturn, io::Error>) -> &Self {
-        self.expect_fork(CallBehavior::Mock(result))
-    }
-
-    pub fn expect_real_pipe(&self) -> &Self {
-        self.expect_pipe(CallBehavior::Real)
-    }
-
-    pub fn expect_mock_pipe(&self, result: Result<PipeFds, io::Error>) -> &Self {
-        self.expect_pipe(CallBehavior::Mock(result))
-    }
-
-    pub fn expect_real_close(&self) -> &Self {
-        self.expect_close(CallBehavior::Real)
-    }
-
-    pub fn expect_mock_close(&self, result: Result<(), io::Error>) -> &Self {
-        self.expect_close(CallBehavior::Mock(result))
-    }
-
-    pub fn expect_real_waitpid(&self) -> &Self {
-        self.expect_waitpid(CallBehavior::Real)
-    }
-
-    pub fn expect_mock_waitpid(&self, result: Result<c_int, io::Error>) -> &Self {
-        self.expect_waitpid(CallBehavior::Mock(result))
-    }
 }
 
-impl SystemFunctions for MockSystemFunctions {
+impl SystemFunctions for MockableSystemFunctions {
     fn fork(&self) -> Result<ForkReturn, io::Error> {
         self.fork_queue
-            .next(|| RealSystemFunctions.fork(), self.is_fallback_enabled())
+            .execute_next(|| self.real_impl.fork(), self.is_fallback_enabled())
     }
 
     fn pipe(&self) -> Result<PipeFds, io::Error> {
         self.pipe_queue
-            .next(|| RealSystemFunctions.pipe(), self.is_fallback_enabled())
+            .execute_next(|| self.real_impl.pipe(), self.is_fallback_enabled())
     }
 
     fn close(&self, fd: c_int) -> Result<(), io::Error> {
         self.close_queue
-            .next(|| RealSystemFunctions.close(fd), self.is_fallback_enabled())
+            .execute_next(|| self.real_impl.close(fd), self.is_fallback_enabled())
     }
 
     fn waitpid(&self, pid: c_int) -> Result<c_int, io::Error> {
-        self.waitpid_queue.next(
-            || RealSystemFunctions.waitpid(pid),
-            self.is_fallback_enabled(),
-        )
+        self.waitpid_queue
+            .execute_next(|| self.real_impl.waitpid(pid), self.is_fallback_enabled())
+    }
+
+    fn _exit(&self, status: c_int) -> ! {
+        if is_mocking_enabled() {
+            // In mock context, we panic instead of exiting
+            panic!("_exit({}) called in mock context", status);
+        } else {
+            // Otherwise, use the real implementation
+            self.real_impl._exit(status)
+        }
     }
 }
 
-// Thread-local storage for the current system functions implementation and mocking state
+// Thread-local storage for the current mocking state
 thread_local! {
-    static SYSTEM_FUNCTIONS: RefCell<Box<dyn SystemFunctions>> = RefCell::new(Box::new(RealSystemFunctions));
-    static IS_MOCKING: Cell<bool> = Cell::new(false);
+    static CURRENT_MOCK: RefCell<Option<MockableSystemFunctions>> = RefCell::new(None);
+    static IS_MOCKING_ENABLED: Cell<bool> = Cell::new(false);
 }
 
 /// Enable mocking for the current thread with the specified mock configuration
-pub fn enable_mocking(mock: MockSystemFunctions) {
-    SYSTEM_FUNCTIONS.with(|f| {
-        *f.borrow_mut() = Box::new(mock);
+pub fn enable_mocking(mock: &MockableSystemFunctions) {
+    CURRENT_MOCK.with(|m| {
+        *m.borrow_mut() = Some(mock.clone());
     });
-    IS_MOCKING.with(|m| m.set(true));
+    IS_MOCKING_ENABLED.with(|e| e.set(true));
 }
 
-/// Disable mocking for the current thread and restore real system calls
+/// Disable mocking for the current thread
 pub fn disable_mocking() {
-    SYSTEM_FUNCTIONS.with(|f| {
-        *f.borrow_mut() = Box::new(RealSystemFunctions);
+    CURRENT_MOCK.with(|m| {
+        *m.borrow_mut() = None;
     });
-    IS_MOCKING.with(|m| m.set(false));
+    IS_MOCKING_ENABLED.with(|e| e.set(false));
 }
 
 /// Returns true if mocking is currently enabled for the current thread
 pub fn is_mocking_enabled() -> bool {
-    IS_MOCKING.with(|m| m.get())
+    IS_MOCKING_ENABLED.with(|e| e.get())
+}
+
+/// Get the current mock configuration
+fn get_current_mock() -> MockableSystemFunctions {
+    CURRENT_MOCK.with(|m| {
+        m.borrow()
+            .clone()
+            .unwrap_or_else(|| panic!("No mock configured but mocking is enabled"))
+    })
 }
 
 /// Configuration options for the mock system
@@ -309,15 +238,18 @@ pub enum MockConfig {
     Strict,
 
     /// Configure the mock with a function, using fallback mode
-    ConfiguredWithFallback(Box<dyn FnOnce(&MockSystemFunctions)>),
+    ConfiguredWithFallback(Box<dyn FnOnce(&MockableSystemFunctions)>),
 
     /// Configure the mock with a function, using strict mode
-    ConfiguredStrict(Box<dyn FnOnce(&MockSystemFunctions)>),
+    ConfiguredStrict(Box<dyn FnOnce(&MockableSystemFunctions)>),
 }
 
 /// Set up mocking environment and execute a test function
-pub fn with_mock_system<R>(config: MockConfig, test_fn: impl FnOnce() -> R) -> R {
-    let mock = MockSystemFunctions::new();
+pub fn with_mock_system<R>(
+    config: MockConfig,
+    test_fn: impl FnOnce(&MockableSystemFunctions) -> R,
+) -> R {
+    let mock = MockableSystemFunctions::new();
 
     // Configure based on the enum variant
     match config {
@@ -337,10 +269,10 @@ pub fn with_mock_system<R>(config: MockConfig, test_fn: impl FnOnce() -> R) -> R
     }
 
     // Enable mocking with the configured mock
-    enable_mocking(mock);
+    enable_mocking(&mock);
 
     // Run the test function with mocking enabled
-    let result = test_fn();
+    let result = test_fn(&mock);
 
     // Disable mocking
     disable_mocking();
@@ -348,41 +280,10 @@ pub fn with_mock_system<R>(config: MockConfig, test_fn: impl FnOnce() -> R) -> R
     result
 }
 
-// Helper functions that delegate to the current implementation
-pub fn fork() -> Result<ForkReturn, io::Error> {
-    SYSTEM_FUNCTIONS.with(|f| f.borrow().fork())
-}
-
-pub fn pipe() -> Result<PipeFds, io::Error> {
-    SYSTEM_FUNCTIONS.with(|f| f.borrow().pipe())
-}
-
-pub fn close(fd: c_int) -> Result<(), io::Error> {
-    SYSTEM_FUNCTIONS.with(|f| f.borrow().close(fd))
-}
-
-pub fn waitpid(pid: c_int) -> Result<c_int, io::Error> {
-    SYSTEM_FUNCTIONS.with(|f| f.borrow().waitpid(pid))
-}
-
-// Special case for _exit since it's a ! function
-pub fn _exit(status: c_int) -> ! {
-    // Check if we're in a mocking context
-    let is_mocking = IS_MOCKING.with(|m| m.get());
-
-    if is_mocking {
-        // In a mock context, we panic instead of exiting
-        panic!("_exit({}) called in mock context", status);
-    } else {
-        // In real context, call the actual _exit
-        unsafe { libc::_exit(status) }
-    }
-}
-
 /// Helper to create a ConfiguredWithFallback variant
 pub fn configured_with_fallback<F>(configure_fn: F) -> MockConfig
 where
-    F: FnOnce(&MockSystemFunctions) + 'static,
+    F: FnOnce(&MockableSystemFunctions) + 'static,
 {
     MockConfig::ConfiguredWithFallback(Box::new(configure_fn))
 }
@@ -390,7 +291,7 @@ where
 /// Helper to create a ConfiguredStrict variant
 pub fn configured_strict<F>(configure_fn: F) -> MockConfig
 where
-    F: FnOnce(&MockSystemFunctions) + 'static,
+    F: FnOnce(&MockableSystemFunctions) + 'static,
 {
     MockConfig::ConfiguredStrict(Box::new(configure_fn))
 }

@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::os::unix::io::FromRawFd;
 
 mod c;
-use c::{_exit, ForkReturn, PipeFds, close, fork, pipe, waitpid};
+use c::{ForkReturn, PipeFds, SystemFunctions};
 
 mod errors;
 use errors::{
@@ -29,9 +29,16 @@ where
     use CallableStatusUnknownError::*;
     use MemIsolateError::*;
 
+    // Use the appropriate implementation based on build config
+    #[cfg(not(test))]
+    let sys = c::RealSystemFunctions;
+
+    #[cfg(test)]
+    let sys = c::mock::MockableSystemFunctions::new();
+
     // Create a pipe.
     // TODO: Should I use dup2 somewhere here?
-    let PipeFds { read_fd, write_fd } = match pipe() {
+    let PipeFds { read_fd, write_fd } = match sys.pipe() {
         Ok(pipe_fds) => pipe_fds,
         Err(err) => {
             return Err(CallableDidNotExecute(PipeCreationFailed(err)));
@@ -43,14 +50,14 @@ where
     const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 3;
     const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
 
-    match fork() {
+    match sys.fork() {
         Err(err) => Err(CallableDidNotExecute(ForkFailed(err))),
         Ok(ForkReturn::Child) => {
             // NOTE: We chose to panic in the child if we can't communicate an error back to the parent.
             // The parent can then interpret this an an UnexpectedChildDeath.
 
             // Close the read end of the pipe
-            if let Err(close_err) = close(read_fd) {
+            if let Err(close_err) = sys.close(read_fd) {
                 let err = CallableDidNotExecute(ChildPipeCloseFailed(Some(close_err)));
                 let encoded = bincode::serialize(&err).expect("failed to serialize error");
 
@@ -60,7 +67,7 @@ where
                     .write_all(&encoded)
                     .expect("failed to write error to pipe");
                 writer.flush().expect("failed to flush error to pipe");
-                _exit(CHILD_EXIT_IF_READ_CLOSE_FAILED);
+                sys._exit(CHILD_EXIT_IF_READ_CLOSE_FAILED);
             }
 
             // Execute the callable and handle serialization
@@ -81,22 +88,22 @@ where
             if let Err(_err) = write_result {
                 // If we can't write to the pipe, we can't communicate the error either
                 // Parent will detect this as an UnexpectedChildDeath
-                _exit(CHILD_EXIT_IF_WRITE_FAILED);
+                sys._exit(CHILD_EXIT_IF_WRITE_FAILED);
             }
 
             // Exit immediately; use _exit to avoid running atexit()/on_exit() handlers
             // and flushing stdio buffers, which are exact clones of the parent in the child process.
-            _exit(CHILD_EXIT_HAPPY);
+            sys._exit(CHILD_EXIT_HAPPY);
             // The code after _exit is unreachable because _exit never returns
         }
         Ok(ForkReturn::Parent(child_pid)) => {
             // Close the write end of the pipe
-            if let Err(close_err) = close(write_fd) {
+            if let Err(close_err) = sys.close(write_fd) {
                 return Err(CallableStatusUnknown(ParentPipeCloseFailed(close_err)));
             }
 
             // Wait for the child process to exit
-            let status = match waitpid(child_pid) {
+            let status = match sys.waitpid(child_pid) {
                 Ok(status) => status,
                 Err(wait_err) => {
                     return Err(CallableStatusUnknown(WaitFailed(wait_err)));
@@ -144,8 +151,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::c::{MockConfig, is_mocking_enabled, with_mock_system};
-    use serde_derive::{Deserialize, Serialize};
+    use crate::c::mock::{MockConfig, is_mocking_enabled, with_mock_system};
+    use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct MyResult {
@@ -233,7 +240,7 @@ mod tests {
 
     #[test]
     fn test_with_mock_helper() {
-        with_mock_system(MockConfig::Fallback, || {
+        with_mock_system(MockConfig::Fallback, |_| {
             // Test with active mocking
             // Check that mocking is properly configured
             assert!(is_mocking_enabled());

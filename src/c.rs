@@ -1,6 +1,9 @@
 use libc::c_int;
-#[cfg(not(test))]
 use std::io;
+
+// For test builds, use our mocking framework
+#[cfg(test)]
+pub mod mock;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForkReturn {
@@ -14,74 +17,71 @@ pub struct PipeFds {
     pub write_fd: c_int,
 }
 
-// For test builds, use our mocking framework
-#[cfg(test)]
-pub mod mock;
+// Define the core trait for system functions
+pub trait SystemFunctions {
+    fn fork(&self) -> Result<ForkReturn, io::Error>;
+    fn pipe(&self) -> Result<PipeFds, io::Error>;
+    fn close(&self, fd: c_int) -> Result<(), io::Error>;
+    fn waitpid(&self, pid: c_int) -> Result<c_int, io::Error>;
+    fn _exit(&self, status: c_int) -> !;
+}
 
-#[cfg(test)]
-pub use mock::*;
+// The real implementation that calls system functions directly
+#[derive(Debug, Clone)]
+pub struct RealSystemFunctions;
 
-// For non-test builds, use the real implementations directly
-#[cfg(not(test))]
-pub fn fork() -> Result<ForkReturn, io::Error> {
-    const FORK_FAILED: i32 = -1;
-    const FORK_CHILD: i32 = 0;
-
-    let ret = unsafe { libc::fork() };
-    match ret {
-        FORK_FAILED => Err(io::Error::last_os_error()),
-        FORK_CHILD => Ok(ForkReturn::Child),
-        _ => {
-            let child_pid = ret;
-            Ok(ForkReturn::Parent(child_pid))
+impl SystemFunctions for RealSystemFunctions {
+    fn fork(&self) -> Result<ForkReturn, io::Error> {
+        let ret = unsafe { libc::fork() };
+        match ret {
+            -1 => Err(io::Error::last_os_error()),
+            0 => Ok(ForkReturn::Child),
+            _ => Ok(ForkReturn::Parent(ret)),
         }
     }
-}
 
-#[cfg(not(test))]
-pub fn pipe() -> Result<PipeFds, io::Error> {
-    let mut pipe_fds: [c_int; 2] = [0; 2];
-    let ret = unsafe { libc::pipe(pipe_fds.as_mut_ptr()) };
-    if ret == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(PipeFds {
-            read_fd: pipe_fds[0],
-            write_fd: pipe_fds[1],
-        })
+    fn pipe(&self) -> Result<PipeFds, io::Error> {
+        let mut pipe_fds: [c_int; 2] = [0; 2];
+        let ret = unsafe { libc::pipe(pipe_fds.as_mut_ptr()) };
+        if ret == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(PipeFds {
+                read_fd: pipe_fds[0],
+                write_fd: pipe_fds[1],
+            })
+        }
+    }
+
+    fn close(&self, fd: c_int) -> Result<(), io::Error> {
+        let ret = unsafe { libc::close(fd) };
+        if ret == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn waitpid(&self, pid: c_int) -> Result<c_int, io::Error> {
+        let mut status: c_int = 0;
+        let ret = unsafe { libc::waitpid(pid, &mut status as *mut c_int, 0) };
+        if ret == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(status)
+        }
+    }
+
+    fn _exit(&self, status: c_int) -> ! {
+        unsafe { libc::_exit(status) }
     }
 }
 
-#[cfg(not(test))]
-pub fn close(fd: c_int) -> Result<(), io::Error> {
-    let ret = unsafe { libc::close(fd) };
-    if ret == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(not(test))]
-pub fn _exit(status: c_int) -> ! {
-    unsafe { libc::_exit(status) };
-}
-
-#[cfg(not(test))]
-pub fn waitpid(pid: c_int) -> Result<c_int, io::Error> {
-    let mut status: c_int = 0;
-    // TODO: Explore if any options are needed
-    let ret = unsafe { libc::waitpid(pid, &mut status as *mut c_int, 0) };
-    if ret == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(status)
-    }
-}
-
+// For test builds, these functions will be provided by the mock module
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mock::*;
     use std::io;
 
     #[test]
@@ -90,8 +90,8 @@ mod tests {
         assert!(!is_mocking_enabled());
 
         // Enable mocking and verify it's enabled
-        let mock = MockSystemFunctions::new();
-        enable_mocking(mock);
+        let mock = MockableSystemFunctions::new();
+        enable_mocking(&mock);
         assert!(is_mocking_enabled());
 
         // Disable mocking and verify it's disabled
@@ -105,7 +105,7 @@ mod tests {
         assert!(!is_mocking_enabled());
 
         // Use the helper function with default configuration
-        with_mock_system(MockConfig::Fallback, || {
+        with_mock_system(MockConfig::Fallback, |_| {
             // Test function
             assert!(is_mocking_enabled());
         });
@@ -116,20 +116,20 @@ mod tests {
 
     #[test]
     fn test_fork_mocking() {
-        let mock = MockSystemFunctions::new();
+        let mock = MockableSystemFunctions::new();
         // Set up parent process return
-        mock.expect_mock_fork(Ok(ForkReturn::Parent(123)));
+        mock.expect_fork(CallBehavior::Mock(Ok(ForkReturn::Parent(123))));
         // Also test child process return
-        mock.expect_mock_fork(Ok(ForkReturn::Child));
+        mock.expect_fork(CallBehavior::Mock(Ok(ForkReturn::Child)));
 
-        enable_mocking(mock);
+        enable_mocking(&mock);
 
         // First call should return Parent
-        let result1 = fork().expect("Fork should succeed");
+        let result1 = mock.fork().expect("Fork should succeed");
         assert!(matches!(result1, ForkReturn::Parent(123)));
 
         // Second call should return Child
-        let result2 = fork().expect("Fork should succeed");
+        let result2 = mock.fork().expect("Fork should succeed");
         assert!(matches!(result2, ForkReturn::Child));
 
         disable_mocking();
@@ -139,34 +139,34 @@ mod tests {
     fn test_pipe_mocking() {
         with_mock_system(
             configured_with_fallback(|mock| {
-                mock.expect_mock_pipe(Ok(PipeFds {
+                mock.expect_pipe(CallBehavior::Mock(Ok(PipeFds {
                     read_fd: 10,
                     write_fd: 11,
-                }))
-                .expect_mock_close(Ok(()))
-                .expect_mock_close(Ok(()));
+                })))
+                .expect_close(CallBehavior::Mock(Ok(())))
+                .expect_close(CallBehavior::Mock(Ok(())));
             }),
-            || {
+            |mock| {
                 // Test function
-                let pipe_fds = pipe().expect("Pipe should succeed");
+                let pipe_fds = mock.pipe().expect("Pipe should succeed");
                 assert_eq!(pipe_fds.read_fd, 10);
                 assert_eq!(pipe_fds.write_fd, 11);
 
                 // Close the file descriptors
-                close(pipe_fds.read_fd).expect("Close should succeed");
-                close(pipe_fds.write_fd).expect("Close should succeed");
+                mock.close(pipe_fds.read_fd).expect("Close should succeed");
+                mock.close(pipe_fds.write_fd).expect("Close should succeed");
             },
         );
     }
 
     #[test]
     fn test_close_mocking() {
-        let mock = MockSystemFunctions::new();
-        mock.expect_mock_close(Ok(()));
+        let mock = MockableSystemFunctions::new();
+        mock.expect_close(CallBehavior::Mock(Ok(())));
 
-        enable_mocking(mock);
+        enable_mocking(&mock);
 
-        let result = close(999); // fd value doesn't matter for mocked call
+        let result = mock.close(999); // fd value doesn't matter for mocked call
         assert!(result.is_ok());
 
         disable_mocking();
@@ -174,12 +174,12 @@ mod tests {
 
     #[test]
     fn test_waitpid_mocking() {
-        let mock = MockSystemFunctions::new();
-        mock.expect_mock_waitpid(Ok(42)); // Mock an exit status of 42
+        let mock = MockableSystemFunctions::new();
+        mock.expect_waitpid(CallBehavior::Mock(Ok(42))); // Mock an exit status of 42
 
-        enable_mocking(mock);
+        enable_mocking(&mock);
 
-        let status = waitpid(123).expect("Waitpid should succeed");
+        let status = mock.waitpid(123).expect("Waitpid should succeed");
         assert_eq!(status, 42);
 
         disable_mocking();
@@ -187,33 +187,35 @@ mod tests {
 
     #[test]
     fn test_error_conditions() {
-        let mock = MockSystemFunctions::new();
+        use CallBehavior::Mock;
+
+        let mock = MockableSystemFunctions::new();
 
         // Set up various error conditions
-        mock.expect_mock_fork(Err(io::Error::from_raw_os_error(libc::EAGAIN)));
-        mock.expect_mock_pipe(Err(io::Error::from_raw_os_error(libc::EMFILE)));
-        mock.expect_mock_close(Err(io::Error::from_raw_os_error(libc::EBADF)));
-        mock.expect_mock_waitpid(Err(io::Error::from_raw_os_error(libc::ECHILD)));
+        mock.expect_fork(Mock(Err(io::Error::from_raw_os_error(libc::EAGAIN))));
+        mock.expect_pipe(Mock(Err(io::Error::from_raw_os_error(libc::EMFILE))));
+        mock.expect_close(Mock(Err(io::Error::from_raw_os_error(libc::EBADF))));
+        mock.expect_waitpid(Mock(Err(io::Error::from_raw_os_error(libc::ECHILD))));
 
-        enable_mocking(mock);
+        enable_mocking(&mock);
 
         // Test fork error
-        let fork_result = fork();
+        let fork_result = mock.fork();
         assert!(fork_result.is_err());
         assert_eq!(fork_result.unwrap_err().raw_os_error(), Some(libc::EAGAIN));
 
         // Test pipe error
-        let pipe_result = pipe();
+        let pipe_result = mock.pipe();
         assert!(pipe_result.is_err());
         assert_eq!(pipe_result.unwrap_err().raw_os_error(), Some(libc::EMFILE));
 
         // Test close error
-        let close_result = close(1);
+        let close_result = mock.close(1);
         assert!(close_result.is_err());
         assert_eq!(close_result.unwrap_err().raw_os_error(), Some(libc::EBADF));
 
         // Test waitpid error
-        let waitpid_result = waitpid(1);
+        let waitpid_result = mock.waitpid(1);
         assert!(waitpid_result.is_err());
         assert_eq!(
             waitpid_result.unwrap_err().raw_os_error(),
@@ -226,12 +228,12 @@ mod tests {
     #[test]
     #[should_panic(expected = "No mock behavior configured for fork()")]
     fn test_missing_fork_expectation() {
-        let mock = MockSystemFunctions::new();
+        let mock = MockableSystemFunctions::new();
         mock.disable_fallback();
-        enable_mocking(mock);
+        enable_mocking(&mock);
 
         // This should panic because we didn't set an expectation
-        let _ = fork();
+        let _ = mock.fork();
 
         // We won't reach this, but it's good practice to clean up
         disable_mocking();
@@ -240,11 +242,11 @@ mod tests {
     #[test]
     #[should_panic(expected = "No mock behavior configured for pipe()")]
     fn test_missing_pipe_expectation() {
-        let mock = MockSystemFunctions::new();
+        let mock = MockableSystemFunctions::new();
         mock.disable_fallback();
-        enable_mocking(mock);
+        enable_mocking(&mock);
 
-        let _ = pipe();
+        let _ = mock.pipe();
 
         disable_mocking();
     }
@@ -252,11 +254,11 @@ mod tests {
     #[test]
     #[should_panic(expected = "No mock behavior configured for close()")]
     fn test_missing_close_expectation() {
-        let mock = MockSystemFunctions::new();
+        let mock = MockableSystemFunctions::new();
         mock.disable_fallback();
-        enable_mocking(mock);
+        enable_mocking(&mock);
 
-        let _ = close(1);
+        let _ = mock.close(1);
 
         disable_mocking();
     }
@@ -264,11 +266,11 @@ mod tests {
     #[test]
     #[should_panic(expected = "No mock behavior configured for waitpid()")]
     fn test_missing_waitpid_expectation() {
-        let mock = MockSystemFunctions::new();
+        let mock = MockableSystemFunctions::new();
         mock.disable_fallback();
-        enable_mocking(mock);
+        enable_mocking(&mock);
 
-        let _ = waitpid(1);
+        let _ = mock.waitpid(1);
 
         disable_mocking();
     }
@@ -276,31 +278,31 @@ mod tests {
     #[test]
     #[should_panic(expected = "_exit(0) called in mock context")]
     fn test_exit_in_mock_context() {
-        let mock = MockSystemFunctions::new();
+        let mock = MockableSystemFunctions::new();
         mock.disable_fallback();
-        enable_mocking(mock);
+        enable_mocking(&mock);
 
         // This should panic with a specific message
-        _exit(0);
+        mock._exit(0);
 
         // WARNING: No disable_mocking() here because its unreachable
     }
 
     #[test]
     fn test_multiple_expectations() {
-        let mock = MockSystemFunctions::new();
+        let mock = MockableSystemFunctions::new();
 
         // Set up a sequence of expectations
-        mock.expect_mock_fork(Ok(ForkReturn::Parent(1)))
-            .expect_mock_fork(Ok(ForkReturn::Parent(2)))
-            .expect_mock_fork(Ok(ForkReturn::Parent(3)));
+        mock.expect_fork(CallBehavior::Mock(Ok(ForkReturn::Parent(1))))
+            .expect_fork(CallBehavior::Mock(Ok(ForkReturn::Parent(2))))
+            .expect_fork(CallBehavior::Mock(Ok(ForkReturn::Parent(3))));
 
-        enable_mocking(mock);
+        enable_mocking(&mock);
 
         // Verify calls are processed in order
-        assert!(matches!(fork().unwrap(), ForkReturn::Parent(1)));
-        assert!(matches!(fork().unwrap(), ForkReturn::Parent(2)));
-        assert!(matches!(fork().unwrap(), ForkReturn::Parent(3)));
+        assert!(matches!(mock.fork().unwrap(), ForkReturn::Parent(1)));
+        assert!(matches!(mock.fork().unwrap(), ForkReturn::Parent(2)));
+        assert!(matches!(mock.fork().unwrap(), ForkReturn::Parent(3)));
 
         disable_mocking();
     }
@@ -310,14 +312,14 @@ mod tests {
         // Create a special io::Error that's not an OS error
         let custom_error = io::Error::new(io::ErrorKind::Other, "Custom error");
 
-        let mock = MockSystemFunctions::new();
+        let mock = MockableSystemFunctions::new();
 
         // For MockResult::from_result, this should convert to EIO
-        mock.expect_mock_fork(Err(custom_error));
+        mock.expect_fork(CallBehavior::Mock(Err(custom_error)));
 
-        enable_mocking(mock);
+        enable_mocking(&mock);
 
-        let result = fork();
+        let result = mock.fork();
         assert!(result.is_err());
         // Should be converted to EIO
         assert_eq!(result.unwrap_err().raw_os_error(), Some(libc::EIO));
@@ -330,22 +332,22 @@ mod tests {
         with_mock_system(
             configured_with_fallback(|mock| {
                 // Configure a mix of real and mock calls
-                mock.expect_real_fork()
-                    .expect_mock_fork(Ok(ForkReturn::Parent(123)))
-                    .expect_real_fork();
+                mock.expect_fork(CallBehavior::Real)
+                    .expect_fork(CallBehavior::Mock(Ok(ForkReturn::Parent(123))))
+                    .expect_fork(CallBehavior::Real);
             }),
-            || {
+            |sys| {
                 // Test function with the configured mock
                 println!("First call: Real implementation");
-                let _result1 = fork();
+                let _result1 = sys.fork();
 
                 println!("Second call: Mock implementation");
-                let result2 = fork().expect("Mock fork should succeed");
+                let result2 = sys.fork().expect("Mock fork should succeed");
                 println!("Got result2: {:?}", result2);
                 assert_eq!(result2, ForkReturn::Parent(123));
 
                 println!("Third call: Real implementation");
-                let _result3 = fork();
+                let _result3 = sys.fork();
             },
         );
     }
