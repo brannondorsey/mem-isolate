@@ -32,11 +32,17 @@ pub struct RealSystemFunctions;
 
 impl SystemFunctions for RealSystemFunctions {
     fn fork(&self) -> Result<ForkReturn, io::Error> {
+        const FORK_FAILED: i32 = -1;
+        const FORK_CHILD: i32 = 0;
+
         let ret = unsafe { libc::fork() };
         match ret {
-            -1 => Err(io::Error::last_os_error()),
-            0 => Ok(ForkReturn::Child),
-            _ => Ok(ForkReturn::Parent(ret)),
+            FORK_FAILED => Err(io::Error::last_os_error()),
+            FORK_CHILD => Ok(ForkReturn::Child),
+            _ => {
+                let child_pid = ret;
+                Ok(ForkReturn::Parent(child_pid))
+            }
         }
     }
 
