@@ -117,8 +117,18 @@ impl Default for MockableSystemFunctions {
 }
 
 impl MockableSystemFunctions {
-    pub fn new() -> Self {
-        Self::default()
+    /// Enable fallback to real implementations when no mock is configured
+    pub fn with_fallback() -> Self {
+        let mock = Self::default();
+        mock.enable_fallback();
+        mock
+    }
+
+    /// Disable fallback to real implementations (strict mocking mode)
+    pub fn strict() -> Self {
+        let mock = Self::default();
+        mock.disable_fallback();
+        mock
     }
 
     /// Enable fallback to real implementations when no mock is configured
@@ -195,8 +205,8 @@ impl SystemFunctions for MockableSystemFunctions {
 
 // Thread-local storage for the current mocking state
 thread_local! {
-    static CURRENT_MOCK: RefCell<Option<MockableSystemFunctions>> = RefCell::new(None);
-    static IS_MOCKING_ENABLED: Cell<bool> = Cell::new(false);
+    static CURRENT_MOCK: RefCell<Option<MockableSystemFunctions>> = const { RefCell::new(None) };
+    static IS_MOCKING_ENABLED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Enable mocking for the current thread with the specified mock configuration
@@ -220,15 +230,6 @@ pub fn is_mocking_enabled() -> bool {
     IS_MOCKING_ENABLED.with(|e| e.get())
 }
 
-/// Get the current mock configuration
-fn get_current_mock() -> MockableSystemFunctions {
-    CURRENT_MOCK.with(|m| {
-        m.borrow()
-            .clone()
-            .unwrap_or_else(|| panic!("No mock configured but mocking is enabled"))
-    })
-}
-
 /// Configuration options for the mock system
 pub enum MockConfig {
     /// Use fallback mode (real implementations when no mock is configured)
@@ -249,13 +250,11 @@ pub fn with_mock_system<R>(
     config: MockConfig,
     test_fn: impl FnOnce(&MockableSystemFunctions) -> R,
 ) -> R {
-    let mock = MockableSystemFunctions::new();
+    let mock = MockableSystemFunctions::with_fallback();
 
     // Configure based on the enum variant
     match config {
-        MockConfig::Fallback => {
-            // Use defaults (fallback enabled)
-        }
+        MockConfig::Fallback => {}
         MockConfig::Strict => {
             mock.disable_fallback();
         }

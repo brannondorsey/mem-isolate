@@ -34,7 +34,7 @@ where
     let sys = c::RealSystemFunctions;
 
     #[cfg(test)]
-    let sys = c::mock::MockableSystemFunctions::new();
+    let sys = c::mock::MockableSystemFunctions::with_fallback();
 
     // Create a pipe.
     // TODO: Should I use dup2 somewhere here?

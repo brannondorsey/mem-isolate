@@ -92,49 +92,67 @@ mod tests {
 
     #[test]
     fn test_mock_enabling_disabling() {
-        // Start with mocking disabled
         assert!(!is_mocking_enabled());
 
-        // Enable mocking and verify it's enabled
-        let mock = MockableSystemFunctions::new();
+        let mock = MockableSystemFunctions::with_fallback();
         enable_mocking(&mock);
         assert!(is_mocking_enabled());
 
-        // Disable mocking and verify it's disabled
         disable_mocking();
         assert!(!is_mocking_enabled());
     }
 
     #[test]
     fn test_with_mock_system_helper() {
-        // Verify mocking is disabled before the block
         assert!(!is_mocking_enabled());
-
-        // Use the helper function with default configuration
         with_mock_system(MockConfig::Fallback, |_| {
-            // Test function
             assert!(is_mocking_enabled());
         });
+        assert!(!is_mocking_enabled());
+    }
 
-        // Verify mocking is disabled after the block
+    #[test]
+    #[should_panic(expected = "No mock behavior configured for fork() and fallback is disabled")]
+    fn test_stict_mocking_panics_when_no_mock_is_configured() {
+        let mock = MockableSystemFunctions::strict();
+        enable_mocking(&mock);
+        let _ = mock.fork();
+        disable_mocking();
+    }
+
+    #[test]
+    #[should_panic(expected = "No mock behavior configured for fork() and fallback is disabled")]
+    fn test_strict_mocking_panics_when_no_mock_is_configured_with_system_helper() {
+        assert!(!is_mocking_enabled());
+        with_mock_system(MockConfig::Strict, |mock| {
+            let _ = mock.fork();
+        });
+        assert!(!is_mocking_enabled());
+    }
+
+    #[test]
+    #[should_panic(expected = "No mock behavior configured for fork() and fallback is disabled")]
+    fn test_strict_mocking_panics_when_no_mock_is_configured_with_system_helper_configured_strict()
+    {
+        assert!(!is_mocking_enabled());
+        with_mock_system(configured_strict(|_| {}), |mock| {
+            let _ = mock.fork();
+        });
         assert!(!is_mocking_enabled());
     }
 
     #[test]
     fn test_fork_mocking() {
-        let mock = MockableSystemFunctions::new();
-        // Set up parent process return
-        mock.expect_fork(CallBehavior::Mock(Ok(ForkReturn::Parent(123))));
-        // Also test child process return
-        mock.expect_fork(CallBehavior::Mock(Ok(ForkReturn::Child)));
+        use CallBehavior::Mock;
+
+        let mock = MockableSystemFunctions::with_fallback();
+        mock.expect_fork(Mock(Ok(ForkReturn::Parent(123))));
+        mock.expect_fork(Mock(Ok(ForkReturn::Child)));
 
         enable_mocking(&mock);
 
-        // First call should return Parent
         let result1 = mock.fork().expect("Fork should succeed");
         assert!(matches!(result1, ForkReturn::Parent(123)));
-
-        // Second call should return Child
         let result2 = mock.fork().expect("Fork should succeed");
         assert!(matches!(result2, ForkReturn::Child));
 
@@ -153,12 +171,11 @@ mod tests {
                 .expect_close(CallBehavior::Mock(Ok(())));
             }),
             |mock| {
-                // Test function
                 let pipe_fds = mock.pipe().expect("Pipe should succeed");
+
                 assert_eq!(pipe_fds.read_fd, 10);
                 assert_eq!(pipe_fds.write_fd, 11);
 
-                // Close the file descriptors
                 mock.close(pipe_fds.read_fd).expect("Close should succeed");
                 mock.close(pipe_fds.write_fd).expect("Close should succeed");
             },
@@ -167,12 +184,12 @@ mod tests {
 
     #[test]
     fn test_close_mocking() {
-        let mock = MockableSystemFunctions::new();
+        let mock = MockableSystemFunctions::with_fallback();
         mock.expect_close(CallBehavior::Mock(Ok(())));
 
         enable_mocking(&mock);
 
-        let result = mock.close(999); // fd value doesn't matter for mocked call
+        let result = mock.close(999);
         assert!(result.is_ok());
 
         disable_mocking();
@@ -180,8 +197,8 @@ mod tests {
 
     #[test]
     fn test_waitpid_mocking() {
-        let mock = MockableSystemFunctions::new();
-        mock.expect_waitpid(CallBehavior::Mock(Ok(42))); // Mock an exit status of 42
+        let mock = MockableSystemFunctions::with_fallback();
+        mock.expect_waitpid(CallBehavior::Mock(Ok(42)));
 
         enable_mocking(&mock);
 
@@ -195,7 +212,7 @@ mod tests {
     fn test_error_conditions() {
         use CallBehavior::Mock;
 
-        let mock = MockableSystemFunctions::new();
+        let mock = MockableSystemFunctions::with_fallback();
 
         // Set up various error conditions
         mock.expect_fork(Mock(Err(io::Error::from_raw_os_error(libc::EAGAIN))));
@@ -234,7 +251,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "No mock behavior configured for fork()")]
     fn test_missing_fork_expectation() {
-        let mock = MockableSystemFunctions::new();
+        let mock = MockableSystemFunctions::with_fallback();
         mock.disable_fallback();
         enable_mocking(&mock);
 
@@ -248,7 +265,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "No mock behavior configured for pipe()")]
     fn test_missing_pipe_expectation() {
-        let mock = MockableSystemFunctions::new();
+        let mock = MockableSystemFunctions::with_fallback();
         mock.disable_fallback();
         enable_mocking(&mock);
 
@@ -260,7 +277,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "No mock behavior configured for close()")]
     fn test_missing_close_expectation() {
-        let mock = MockableSystemFunctions::new();
+        let mock = MockableSystemFunctions::with_fallback();
         mock.disable_fallback();
         enable_mocking(&mock);
 
@@ -272,7 +289,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "No mock behavior configured for waitpid()")]
     fn test_missing_waitpid_expectation() {
-        let mock = MockableSystemFunctions::new();
+        let mock = MockableSystemFunctions::with_fallback();
         mock.disable_fallback();
         enable_mocking(&mock);
 
@@ -284,7 +301,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "_exit(0) called in mock context")]
     fn test_exit_in_mock_context() {
-        let mock = MockableSystemFunctions::new();
+        let mock = MockableSystemFunctions::with_fallback();
         mock.disable_fallback();
         enable_mocking(&mock);
 
@@ -296,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_multiple_expectations() {
-        let mock = MockableSystemFunctions::new();
+        let mock = MockableSystemFunctions::with_fallback();
 
         // Set up a sequence of expectations
         mock.expect_fork(CallBehavior::Mock(Ok(ForkReturn::Parent(1))))
@@ -318,7 +335,7 @@ mod tests {
         // Create a special io::Error that's not an OS error
         let custom_error = io::Error::new(io::ErrorKind::Other, "Custom error");
 
-        let mock = MockableSystemFunctions::new();
+        let mock = MockableSystemFunctions::with_fallback();
 
         // For MockResult::from_result, this should convert to EIO
         mock.expect_fork(CallBehavior::Mock(Err(custom_error)));
