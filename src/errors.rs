@@ -10,12 +10,11 @@ use thiserror::Error;
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum MemIsolateError {
     #[error("an error occurred after the callable was executed")]
-    CallableExecuted(CallableExecutedError),
-    // TODO: Sourcify all errors
+    CallableExecuted(#[source] CallableExecutedError),
     #[error("an error occurred before the callable was executed")]
     CallableDidNotExecute(#[source] CallableDidNotExecuteError),
     #[error("the callable process exited with an unknown status")]
-    CallableStatusUnknown(CallableStatusUnknownError),
+    CallableStatusUnknown(#[source] CallableStatusUnknownError),
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -28,19 +27,19 @@ pub enum CallableExecutedError {
         serialize_with = "serialize_bincode_error",
         deserialize_with = "deserialize_bincode_error"
     )]
-    SerializationFailed(bincode::Error),
+    SerializationFailed(#[source] bincode::Error),
     #[error("an error occurred while deserializing the result of the callable")]
     #[serde(
         serialize_with = "serialize_bincode_error",
         deserialize_with = "deserialize_bincode_error"
     )]
-    DeserializationFailed(bincode::Error),
+    DeserializationFailed(#[source] bincode::Error),
     #[serde(
         serialize_with = "serialize_option_os_error",
         deserialize_with = "deserialize_option_os_error"
     )]
     #[error("system error encountered writing the child's result to the pipe")]
-    ChildPipeWriteFailed(Option<io::Error>),
+    ChildPipeWriteFailed(#[source] Option<io::Error>),
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -61,7 +60,7 @@ pub enum CallableDidNotExecuteError {
         deserialize_with = "deserialize_option_os_error"
     )]
     #[error("system error encountered closing the child's copy of the pipe's read end")]
-    ChildPipeCloseFailed(Option<io::Error>),
+    ChildPipeCloseFailed(#[source] Option<io::Error>),
     #[serde(
         serialize_with = "serialize_os_error",
         deserialize_with = "deserialize_os_error"
@@ -77,19 +76,19 @@ pub enum CallableStatusUnknownError {
         deserialize_with = "deserialize_os_error"
     )]
     #[error("system error encountered closing the parent's copy of the pipe's write end")]
-    ParentPipeCloseFailed(io::Error),
+    ParentPipeCloseFailed(#[source] io::Error),
     #[serde(
         serialize_with = "serialize_os_error",
         deserialize_with = "deserialize_os_error"
     )]
     #[error("system error encountered waiting for the child process")]
-    WaitFailed(io::Error),
+    WaitFailed(#[source] io::Error),
     #[serde(
         serialize_with = "serialize_os_error",
         deserialize_with = "deserialize_os_error"
     )]
     #[error("system error encountered reading the child's result from the pipe")]
-    ParentPipeReadFailed(io::Error),
+    ParentPipeReadFailed(#[source] io::Error),
     #[error("the callable process died during execution")]
     CallableProcessDiedDuringExecution,
     #[error("the callable process exited with an unexpected status")]
