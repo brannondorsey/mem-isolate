@@ -11,7 +11,7 @@ mod errors;
 pub use errors::MemIsolateError;
 use errors::{CallableDidNotExecuteError, CallableExecutedError, CallableStatusUnknownError};
 
-/// Execute `callable` in a forked child process so that any memory changes during do not affect the parent.
+/// Execute `callable` in a forked child process so that any memory changes during execution do not affect the parent.
 /// The child serializes its result (using bincode) and writes it through a pipe, which the parent reads and deserializes.
 ///
 /// # Safety
