@@ -12,6 +12,18 @@ struct MyResult {
     value: i32,
 }
 
+fn error_eio() -> io::Error {
+    io::Error::from_raw_os_error(libc::EIO)
+}
+
+fn error_eagain() -> io::Error {
+    io::Error::from_raw_os_error(libc::EAGAIN)
+}
+
+fn error_enfile() -> io::Error {
+    io::Error::from_raw_os_error(libc::ENFILE)
+}
+
 // TODO: Add test for memory leaks with Box::leak(). My first attempt at this proved challenging only in the detection mechanism.
 
 #[test]
@@ -89,74 +101,6 @@ fn all_function_types() {
     };
     let result = execute_in_isolated_process(fn_once_closure).unwrap();
     assert_eq!(result, MyResult { value: 5 });
-}
-
-#[test]
-fn with_mock_helper() {
-    with_mock_system(MockConfig::Fallback, |_| {
-        // Test with active mocking
-        // Check that mocking is properly configured
-        assert!(is_mocking_enabled());
-
-        // Test code that uses mocked functions
-        let result = execute_in_isolated_process(|| MyResult { value: 42 }).unwrap();
-        assert_eq!(result, MyResult { value: 42 });
-    });
-
-    // After with_mock_system, mocking is disabled automatically
-    assert!(!is_mocking_enabled());
-}
-
-#[test]
-fn pipe_error() {
-    with_mock_system(
-        // Pipe creation is the first syscall in execute_in_isolated_process so we can afford
-        // to use strict mode here.
-        configured_strict(|mock| {
-            let pipe_creation_error = io::Error::from_raw_os_error(libc::ENFILE);
-            mock.expect_pipe(CallBehavior::Mock(Err(pipe_creation_error)));
-        }),
-        |_| {
-            let result = execute_in_isolated_process(|| MyResult { value: 42 });
-            let err = result.unwrap_err();
-            matches!(
-                err,
-                MemIsolateError::CallableDidNotExecute(
-                    CallableDidNotExecuteError::PipeCreationFailed(_)
-                )
-            );
-
-            let pipe_creation_error = io::Error::from_raw_os_error(libc::ENFILE);
-            assert_eq!(
-                err.source().unwrap().source().unwrap().to_string(),
-                pipe_creation_error.to_string()
-            );
-        },
-    );
-}
-
-#[test]
-fn fork_error() {
-    with_mock_system(
-        configured_with_fallback(|mock| {
-            let fork_error = io::Error::from_raw_os_error(libc::EAGAIN);
-            mock.expect_fork(CallBehavior::Mock(Err(fork_error)));
-        }),
-        |_| {
-            let result = execute_in_isolated_process(|| MyResult { value: 42 });
-            let err = result.unwrap_err();
-            matches!(
-                err,
-                MemIsolateError::CallableDidNotExecute(CallableDidNotExecuteError::ForkFailed(_))
-            );
-
-            let fork_error = io::Error::from_raw_os_error(libc::EAGAIN);
-            assert_eq!(
-                err.source().unwrap().source().unwrap().to_string(),
-                fork_error.to_string()
-            );
-        },
-    );
 }
 
 #[test]
@@ -249,4 +193,101 @@ fn deserialization_error() {
         }
         other => panic!("Expected DeserializationFailed error, got: {:?}", other),
     }
+}
+
+#[test]
+fn with_mock_helper() {
+    with_mock_system(MockConfig::Fallback, |_| {
+        // Test with active mocking
+        // Check that mocking is properly configured
+        assert!(is_mocking_enabled());
+
+        // Test code that uses mocked functions
+        let result = execute_in_isolated_process(|| MyResult { value: 42 }).unwrap();
+        assert_eq!(result, MyResult { value: 42 });
+    });
+
+    // After with_mock_system, mocking is disabled automatically
+    assert!(!is_mocking_enabled());
+}
+
+#[test]
+fn pipe_error() {
+    with_mock_system(
+        // Pipe creation is the first syscall in execute_in_isolated_process so we can afford
+        // to use strict mode here.
+        configured_strict(|mock| {
+            let pipe_creation_error = error_enfile();
+            mock.expect_pipe(CallBehavior::Mock(Err(pipe_creation_error)));
+        }),
+        |_| {
+            let result = execute_in_isolated_process(|| MyResult { value: 42 });
+            let err = result.unwrap_err();
+            matches!(
+                err,
+                MemIsolateError::CallableDidNotExecute(
+                    CallableDidNotExecuteError::PipeCreationFailed(_)
+                )
+            );
+
+            let pipe_creation_error = error_enfile();
+            assert_eq!(
+                err.source().unwrap().source().unwrap().to_string(),
+                pipe_creation_error.to_string()
+            );
+        },
+    );
+}
+
+#[test]
+fn fork_error() {
+    with_mock_system(
+        configured_with_fallback(|mock| {
+            let fork_error = error_eagain();
+            mock.expect_fork(CallBehavior::Mock(Err(fork_error)));
+        }),
+        |_| {
+            let result = execute_in_isolated_process(|| MyResult { value: 42 });
+            let err = result.unwrap_err();
+            matches!(
+                err,
+                MemIsolateError::CallableDidNotExecute(CallableDidNotExecuteError::ForkFailed(_))
+            );
+
+            let fork_error = error_eagain();
+            assert_eq!(
+                err.source().unwrap().source().unwrap().to_string(),
+                fork_error.to_string()
+            );
+        },
+    );
+}
+
+#[test]
+fn parent_pipe_close_failure() {
+    with_mock_system(
+        configured_with_fallback(|mock| {
+            // Let pipe() and fork() succeed normally
+            // But make the first call to close() fail
+            // This will affect the parent's attempt to close the write_fd
+            let close_error = error_eio(); // I/O error
+            mock.expect_close(CallBehavior::Mock(Err(close_error)));
+        }),
+        |_| {
+            let result = execute_in_isolated_process(|| MyResult { value: 42 });
+
+            // The close failure should result in a CallableStatusUnknown error
+            match result {
+                Err(MemIsolateError::CallableStatusUnknown(
+                    CallableStatusUnknownError::ParentPipeCloseFailed(err),
+                )) => {
+                    // Verify the error matches what we configured
+                    let expected_error = error_eio();
+                    assert_eq!(err.kind(), expected_error.kind());
+                    assert_eq!(err.raw_os_error(), expected_error.raw_os_error());
+                }
+                other => panic!("Expected ParentPipeCloseFailed error, got: {:?}", other),
+            }
+        },
+    );
 }
