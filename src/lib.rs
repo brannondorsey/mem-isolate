@@ -161,9 +161,11 @@ where
 mod tests {
     use super::*;
     use crate::c::mock::{
-        CallBehavior, MockConfig, configured_strict, is_mocking_enabled, with_mock_system,
+        CallBehavior, MockConfig, configured_strict, configured_with_fallback, is_mocking_enabled,
+        with_mock_system,
     };
     use serde::{Deserialize, Serialize};
+    use std::error::Error;
     use std::io;
 
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -268,16 +270,15 @@ mod tests {
 
     #[test]
     fn test_pipe_error() {
-        use std::error::Error;
         with_mock_system(
+            // Pipe creation is the first syscall in execute_in_isolated_process so we can afford
+            // to use strict mode here.
             configured_strict(|mock| {
                 let pipe_creation_error = io::Error::from_raw_os_error(libc::ENFILE);
                 mock.expect_pipe(CallBehavior::Mock(Err(pipe_creation_error)));
             }),
             |_| {
                 let result = execute_in_isolated_process(|| MyResult { value: 42 });
-                assert!(is_mocking_enabled());
-                assert!(result.is_err());
                 let err = result.unwrap_err();
                 matches!(
                     err,
@@ -290,6 +291,36 @@ mod tests {
                 assert_eq!(
                     err.source().unwrap().source().unwrap().to_string(),
                     pipe_creation_error.to_string()
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn test_fork_error() {
+        with_mock_system(
+            configured_with_fallback(|mock| {
+                let fork_error = io::Error::from_raw_os_error(libc::EAGAIN);
+                mock.expect_fork(CallBehavior::Mock(Err(fork_error)));
+            }),
+            |_| {
+                let result = execute_in_isolated_process(|| MyResult { value: 42 });
+                let err = result.unwrap_err();
+                matches!(
+                    err,
+                    MemIsolateError::CallableDidNotExecute(CallableDidNotExecuteError::ForkFailed(
+                        _
+                    ))
+                );
+
+                let fork_error = io::Error::from_raw_os_error(libc::EAGAIN);
+                assert_eq!(
+                    err.source()
+                        .expect("first error source")
+                        .source()
+                        .expect("second error source")
+                        .to_string(),
+                    fork_error.to_string()
                 );
             },
         );

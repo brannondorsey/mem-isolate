@@ -66,7 +66,7 @@ pub enum CallableDidNotExecuteError {
         deserialize_with = "deserialize_os_error"
     )]
     #[error("system error encountered forking the child process: {0}")]
-    ForkFailed(io::Error),
+    ForkFailed(#[source] io::Error),
 }
 
 #[derive(Error, Debug, Serialize, Deserialize)]
