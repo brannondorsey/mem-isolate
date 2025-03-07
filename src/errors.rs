@@ -21,19 +21,9 @@ pub enum MemIsolateError {
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum CallableExecutedError {
     #[error("an error occurred while serializing the result of the callable: {0}")]
-    #[serde(
-        // WARNING: This is improper serialization. This is a bug.
-        // FIXME
-        serialize_with = "serialize_bincode_error",
-        deserialize_with = "deserialize_bincode_error"
-    )]
-    SerializationFailed(#[source] bincode::Error),
+    SerializationFailed(String),
     #[error("an error occurred while deserializing the result of the callable: {0}")]
-    #[serde(
-        serialize_with = "serialize_bincode_error",
-        deserialize_with = "deserialize_bincode_error"
-    )]
-    DeserializationFailed(#[source] bincode::Error),
+    DeserializationFailed(String),
     #[serde(
         serialize_with = "serialize_option_os_error",
         deserialize_with = "deserialize_option_os_error"
@@ -134,21 +124,6 @@ where
         Some(s) => Ok(Some(io::Error::from_raw_os_error(s))),
         None => Ok(None),
     }
-}
-
-fn serialize_bincode_error<S>(error: &bincode::Error, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_str(&error.to_string())
-}
-
-fn deserialize_bincode_error<'de, D>(deserializer: D) -> Result<bincode::Error, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s: String = String::deserialize(deserializer)?;
-    Ok(bincode::Error::new(bincode::ErrorKind::Custom(s)))
 }
 
 fn format_option_error(err: &Option<io::Error>) -> String {

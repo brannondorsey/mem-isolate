@@ -82,7 +82,7 @@ where
             let encoded = match bincode::serialize(&Ok::<T, MemIsolateError>(result)) {
                 Ok(encoded) => encoded,
                 Err(err) => {
-                    let err = CallableExecuted(SerializationFailed(err));
+                    let err = CallableExecuted(SerializationFailed(err.to_string()));
                     bincode::serialize(&Err::<T, MemIsolateError>(err))
                         .expect("failed to serialize error")
                 }
@@ -151,7 +151,7 @@ where
             match bincode::deserialize::<Result<T, MemIsolateError>>(&buffer) {
                 Ok(Ok(result)) => Ok(result),
                 Ok(Err(err)) => Err(err),
-                Err(err) => Err(CallableExecuted(DeserializationFailed(err))),
+                Err(err) => Err(CallableExecuted(DeserializationFailed(err.to_string()))),
             }
         }
     }
@@ -315,14 +315,104 @@ mod tests {
 
                 let fork_error = io::Error::from_raw_os_error(libc::EAGAIN);
                 assert_eq!(
-                    err.source()
-                        .expect("first error source")
-                        .source()
-                        .expect("second error source")
-                        .to_string(),
+                    err.source().unwrap().source().unwrap().to_string(),
                     fork_error.to_string()
                 );
             },
         );
+    }
+
+    #[test]
+    fn test_serialization_error() {
+        // Custom type that implements Serialize but fails during serialization
+        #[derive(Debug)]
+        struct CustomIteratorWrapper {
+            _data: Vec<i32>,
+        }
+
+        impl Serialize for CustomIteratorWrapper {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("Fake serialization error"))
+            }
+        }
+
+        impl<'de> Deserialize<'de> for CustomIteratorWrapper {
+            fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                Ok(CustomIteratorWrapper { _data: vec![] })
+            }
+        }
+
+        // Use our function with a closure that returns the problematic type
+        let result = execute_in_isolated_process(|| CustomIteratorWrapper {
+            _data: vec![1, 2, 3],
+        });
+
+        // Verify we get the expected serialization error
+        match result {
+            Err(MemIsolateError::CallableExecuted(CallableExecutedError::SerializationFailed(
+                err,
+            ))) => {
+                assert!(
+                    err.contains("Fake serialization error"),
+                    "Expected error about sequence length, got: {}",
+                    err
+                );
+            }
+            other => panic!("Expected SerializationFailed error, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_deserialization_error() {
+        // Custom type that successfully serializes but fails during deserialization
+        #[derive(Debug, PartialEq)]
+        struct DeserializationFailer {
+            data: i32,
+        }
+
+        impl Serialize for DeserializationFailer {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                // Successfully serialize as a simple integer
+                self.data.serialize(serializer)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for DeserializationFailer {
+            fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                // Always fail deserialization with a custom error
+                Err(serde::de::Error::custom(
+                    "Intentional deserialization failure",
+                ))
+            }
+        }
+
+        // Use our function with a closure that returns the problematic type
+        let result = execute_in_isolated_process(|| DeserializationFailer { data: 42 });
+
+        // Verify we get the expected deserialization error
+        match result {
+            Err(MemIsolateError::CallableExecuted(
+                CallableExecutedError::DeserializationFailed(err),
+            )) => {
+                assert!(
+                    err.contains("Intentional deserialization failure"),
+                    "Expected custom deserialization error, got: {}",
+                    err
+                );
+            }
+            other => panic!("Expected DeserializationFailed error, got: {:?}", other),
+        }
     }
 }
