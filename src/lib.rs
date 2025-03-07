@@ -1,5 +1,3 @@
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::io::FromRawFd;
@@ -10,6 +8,9 @@ use c::{ForkReturn, PipeFds, SystemFunctions};
 mod errors;
 pub use errors::MemIsolateError;
 use errors::{CallableDidNotExecuteError, CallableExecutedError, CallableStatusUnknownError};
+
+// Re-export the serde traits our public API depends on
+pub use serde::{Serialize, de::DeserializeOwned};
 
 /// Execute `callable` in a forked child process so that any memory changes during execution do not affect the parent.
 /// The child serializes its result (using bincode) and writes it through a pipe, which the parent reads and deserializes.
@@ -275,7 +276,6 @@ mod tests {
             }),
             |_| {
                 let result = execute_in_isolated_process(|| MyResult { value: 42 });
-                println!("result: {:?}", result);
                 assert!(is_mocking_enabled());
                 assert!(result.is_err());
                 let err = result.unwrap_err();
