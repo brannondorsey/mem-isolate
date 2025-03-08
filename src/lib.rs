@@ -8,7 +8,7 @@ mod tests;
 mod c;
 use c::{ForkReturn, PipeFds, SystemFunctions};
 
-mod errors;
+pub mod errors;
 pub use errors::MemIsolateError;
 use errors::{CallableDidNotExecuteError, CallableExecutedError, CallableStatusUnknownError};
 

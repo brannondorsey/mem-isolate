@@ -1,22 +1,62 @@
-// TODO: Should I be using serde_derive instead of serde?
+//! Error handling is an important part of the `mem-isolate` crate. If something
+//! went wrong, we want to give the caller as much context as possible about how
+//! that error effected their `callable`, so they are well-equipped to know what
+//! to do about it.
+//!
+//! The primary error type is [`MemIsolateError`], which is returned by
+//! [`crate::execute_in_isolated_process`].
+//!
+//! Philosophically, error handling in `mem-isolate` is organized into three
+//! levels of error wrapping:
+//!
+//! 1. The first level describes the effect of the error on the `callable` (e.g.
+//!    did your callable function execute or not)
+//! 2. The second level describes what `mem-isolate` operation caused the error
+//!    (e.g. did serialization fail)
+//! 3. The third level is the underlying OS error if it is available (e.g. an
+//!    `io::Error`)
+//!
+//! For most applications, you'll care only about the first level. For an
+//! example of common error handling dealing only with first level errors, see
+//! [`examples/error-handling-basic.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/examples/error-handling-basic.rs).
+//!
+//! Levels two and three are useful if you want to know more about what
+//! **exactly** went wrong and expose internals about how `mem-isolate` works.
+//!
+//! Note: These errors all describe things that went wrong with a `mem-isolate`
+//! operation. They have nothing to do with the `callable` you passed to
+//! [`crate::execute_in_isolated_process`], which can define its own errors and
+//! maybe values by returning a [`Result`] or [`Option`] type.
+
 use serde::Deserialize;
 use serde::Serialize;
 use std::io;
 use thiserror::Error;
 
-// New Error proposal
-#[allow(dead_code)]
-#[allow(clippy::enum_variant_names)]
+/// [`MemIsolateError`] is the **primary error type returned by the crate**. The
+/// goal is to give the caller context about what happened to their callable if
+/// something went wrong.
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum MemIsolateError {
-    #[error("an error occurred after the callable was executed: {0}")]
-    CallableExecuted(#[source] CallableExecutedError),
+    /// Indicates something went wrong before the callable was executed. Because
+    /// the callable never executed, it should be safe to naively retry the the
+    /// callable with or without mem-isolate, even if the function is not
+    /// idempotent.
     #[error("an error occurred before the callable was executed: {0}")]
     CallableDidNotExecute(#[source] CallableDidNotExecuteError),
+
+    /// Indicates something went wrong after the callable was executed. **Do not**
+    /// retry execution of the callable unless it is idempotent.
+    #[error("an error occurred after the callable was executed: {0}")]
+    CallableExecuted(#[source] CallableExecutedError),
+
+    /// Indicates something went wrong, but it is unknown wether the callable was
+    /// executed. **You should retry the callable only if it is idempotent.**
     #[error("the callable process exited with an unknown status: {0}")]
     CallableStatusUnknown(#[source] CallableStatusUnknownError),
 }
 
+// TODO: Document the rest of these errors
 #[allow(clippy::enum_variant_names)]
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum CallableExecutedError {

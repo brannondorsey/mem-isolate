@@ -73,7 +73,7 @@ fn main() -> Result<(), MemIsolateError> {
 
 // Add a smoke test to make sure this example stays working
 #[cfg(test)]
-mod example_error_handling {
+mod example_error_handling_basic {
     use super::*;
 
     #[test]
