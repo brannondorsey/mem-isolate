@@ -1,3 +1,8 @@
+#[cfg(not(any(target_family = "unix")))]
+compile_error!(
+    "Because of its heavy use of POSIX system calls, this crate only supports Unix-like operating systems (e.g. Linux, macOS, BSD)"
+);
+
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::io::FromRawFd;
