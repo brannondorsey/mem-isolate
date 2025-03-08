@@ -1,13 +1,15 @@
 # mem-isolate: Run unsafe code safely
 
-`mem-isolate` runs your function via a `fork()`, waits for the result, and returns it. This grants your code access to an exact copy of memory and state at the time just before the call, but gaurantees that the function will not affect the parent process in any way. It forces functions to be pure, even if they aren't.
+`mem-isolate` runs your function via a `fork()`, waits for the result, and returns it.
+
+This grants your code access to an exact copy of memory and state at the time just before the call, but gaurantees that the function will not affect the parent process in any way. It forces functions to be pure, even if they aren't.
 
 ```rust
 use mem_isolate::execute_in_isolated_process;
 
-// No heap, stack, or program memory out here
+// No heap, stack, or program memory out here...
 let result = mem_isolate::execute_in_isolated_process(|| {
-    // Can be affected by anything in here
+    // ...Can be affected by anything in here
     unsafe {
         gnarly_cpp_bindings::potentially_leaking_function();
         unstable_ffi::segfault_prone_function();
@@ -17,7 +19,7 @@ let result = mem_isolate::execute_in_isolated_process(|| {
 });
 ```
 
-Uses:
+Example use cases:
 
 * Running code with a known memory leak
 * Running code that fragments the heap
@@ -34,7 +36,7 @@ We call this the "fork and free" pattern.
 
 Raw function calls are ~1.5ns, forks() + wait is ~1.7ms, and my unoptimized `execute_in_isolated_process()` is about 1.9ms. Slow, but tolerable for many use cases.
 
-```
+```txt
 cargo bench
     Finished `bench` profile [optimized] target(s) in 0.07s
      Running unittests src/lib.rs (target/release/deps/mem_isolate-d96fcfa5f2fd31c0)

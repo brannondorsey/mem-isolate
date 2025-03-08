@@ -56,27 +56,44 @@ pub enum MemIsolateError {
     CallableStatusUnknown(#[source] CallableStatusUnknownError),
 }
 
-// TODO: Document the rest of these errors
-#[allow(clippy::enum_variant_names)]
+/// An error indicating something went wrong **after** the user-supplied callable was executed
+///
+/// You should only retry the callable if it is idempotent.
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum CallableExecutedError {
-    #[error("an error occurred while serializing the result of the callable: {0}")]
+    /// An error occurred while serializing the result of the callable inside the child process
+    #[error(
+        "an error occurred while serializing the result of the callable inside the child process: {0}"
+    )]
     SerializationFailed(String),
-    #[error("an error occurred while deserializing the result of the callable: {0}")]
+
+    /// An error occurred while deserializing the result of the callable in the parent process
+    #[error(
+        "an error occurred while deserializing the result of the callable in the parent process: {0}"
+    )]
     DeserializationFailed(String),
+
+    /// A system error occurred while writing the child process's result to the pipe.
     #[serde(
         serialize_with = "serialize_option_os_error",
         deserialize_with = "deserialize_option_os_error"
     )]
-    #[error("system error encountered writing the child's result to the pipe: {}", format_option_error(.0))]
+    #[error("system error encountered writing the child process's result to the pipe: {}", format_option_error(.0))]
     ChildPipeWriteFailed(#[source] Option<io::Error>),
 }
 
-#[allow(clippy::enum_variant_names)]
+/// An error indicating something went wrong **before** the user-supplied
+/// callable was executed
+///
+/// It is harmless to retry the callable.
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum CallableDidNotExecuteError {
-    // TODO: Consider making these io::Errors be RawOsError typedefs instead. That rules out a ton of overloaded io::Error posibilities. It's more precise.
-    // WARNING: Serialization will fail if this is not an OS error.
+    // TODO: Consider making these io::Errors be RawOsError typedefs instead.
+    // That rules out a ton of overloaded io::Error posibilities. It's more
+    // precise. WARNING: Serialization will fail if this is not an OS error.
+    //
+    /// A system error ocurred while creating the pipe used to communicate with
+    /// the child process
     #[serde(
         serialize_with = "serialize_os_error",
         deserialize_with = "deserialize_os_error"
@@ -85,12 +102,18 @@ pub enum CallableDidNotExecuteError {
         "system error encountered creating the pipe used to communicate with the child process: {0}"
     )]
     PipeCreationFailed(#[source] io::Error),
+
+    /// A system error ocurred while closing the child process's copy of the
+    /// pipe's read end
     #[serde(
         serialize_with = "serialize_option_os_error",
         deserialize_with = "deserialize_option_os_error"
     )]
     #[error("system error encountered closing the child's copy of the pipe's read end: {}", format_option_error(.0))]
     ChildPipeCloseFailed(#[source] Option<io::Error>),
+
+    /// A system error ocurred while forking the child process which is used to
+    /// execute user-supplied callable
     #[serde(
         serialize_with = "serialize_os_error",
         deserialize_with = "deserialize_os_error"
@@ -99,28 +122,47 @@ pub enum CallableDidNotExecuteError {
     ForkFailed(#[source] io::Error),
 }
 
+/// An error indicating that something went wrong in a way where it is difficult
+/// or impossible to determine wether the user-supplied callable was executed
+/// `¯\_(ツ)_/¯`
+///
+/// You should only retry the callable if it is idempotent.
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum CallableStatusUnknownError {
+    /// A system error ocurred while closing the parent's copy of the pipe's
+    /// write end
     #[serde(
         serialize_with = "serialize_os_error",
         deserialize_with = "deserialize_os_error"
     )]
     #[error("system error encountered closing the parent's copy of the pipe's write end: {0}")]
     ParentPipeCloseFailed(#[source] io::Error),
+
+    /// A system error ocurred while waiting for the child process to exit
     #[serde(
         serialize_with = "serialize_os_error",
         deserialize_with = "deserialize_os_error"
     )]
     #[error("system error encountered waiting for the child process: {0}")]
     WaitFailed(#[source] io::Error),
+
+    /// A system error ocurred while reading the child's result from the pipe
     #[serde(
         serialize_with = "serialize_os_error",
         deserialize_with = "deserialize_os_error"
     )]
     #[error("system error encountered reading the child's result from the pipe: {0}")]
     ParentPipeReadFailed(#[source] io::Error),
+
+    /// The callable process died while executing the user-supplied callable
     #[error("the callable process died during execution")]
     CallableProcessDiedDuringExecution,
+
+    /// The child process responsible for executing the user-supplied callable
+    /// exited with an unexpected status
+    ///
+    /// Note this does not represent some sort of exit code or return value
+    /// indicating the success or failure of the user-supplied callable itself.
     #[error("the callable process exited with an unexpected status: {0}")]
     UnexpectedChildExitStatus(i32),
 }

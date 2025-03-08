@@ -15,13 +15,17 @@ use errors::{CallableDidNotExecuteError, CallableExecutedError, CallableStatusUn
 // Re-export the serde traits our public API depends on
 pub use serde::{Serialize, de::DeserializeOwned};
 
-/// Execute `callable` in a forked child process so that any memory changes during execution do not affect the parent.
-/// The child serializes its result (using bincode) and writes it through a pipe, which the parent reads and deserializes.
+/// Executes a user-supplied `callable` in a forked child process so that any
+/// memory changes during execution do not affect the parent. The child
+/// serializes its result (using bincode) and writes it through a pipe, which
+/// the parent reads and deserializes.
 ///
 /// # Safety
-/// This code directly calls glibc functions (via the libc crate) and should only be used in a Unix environment.
-// TODO: Real error handling with thiserror. Plumbing errors in the child also need to be passed back to the parent.
-// TODO: Benchmark nicing the child process.
+/// This code directly calls glibc functions (via the libc crate) and should
+/// only be used in a Unix environment.
+// TODO: Real error handling with thiserror. Plumbing errors in the child also
+// need to be passed back to the parent. TODO: Benchmark nicing the child
+// process.
 pub fn execute_in_isolated_process<F, T>(callable: F) -> Result<T, MemIsolateError>
 where
     // TODO: Consider restricting to disallow FnMut() closures
