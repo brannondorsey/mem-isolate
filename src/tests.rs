@@ -276,7 +276,6 @@ fn parent_pipe_close_failure() {
         |_| {
             let result = execute_in_isolated_process(|| MyResult { value: 42 });
 
-            // The close failure should result in a CallableStatusUnknown error
             match result {
                 Err(MemIsolateError::CallableStatusUnknown(
                     CallableStatusUnknownError::ParentPipeCloseFailed(err),
@@ -291,3 +290,51 @@ fn parent_pipe_close_failure() {
         },
     );
 }
+
+// // TODO: Come back and fix this test.
+// #[test]
+// fn parent_pipe_reader_invalid() {
+//     use crate::c::PipeFds;
+
+//     fn error_ebadf() -> io::Error {
+//         io::Error::from_raw_os_error(libc::EBADF)
+//     }
+
+//     // Create a real pipe, but only
+
+//     with_mock_system(
+//         configured_with_fallback(move |mock| {
+//             let invalid_read_fd = -100; // If this is a -1 we get another problem
+
+//             let sys = c::RealSystemFunctions;
+//             let PipeFds {
+//                 read_fd: real_read_fd,
+//                 write_fd: real_write_fd,
+//             } = sys.pipe().expect("pipe should succeed");
+
+//             // Close the real read_fd since we're replacing it with an invalid one
+//             sys.close(real_read_fd)
+//                 .expect("closing real read_fd should succeed");
+
+//             mock.expect_pipe(CallBehavior::Mock(Ok(PipeFds {
+//                 read_fd: invalid_read_fd,
+//                 write_fd: real_write_fd,
+//             })));
+//         }),
+//         |_| {
+//             let result = execute_in_isolated_process(|| MyResult { value: 42 });
+
+//             match result {
+//                 Err(MemIsolateError::CallableStatusUnknown(
+//                     CallableStatusUnknownError::ParentPipeReadFailed(err),
+//                 )) => {
+//                     // Verify the error matches what we configured
+//                     let expected_error = error_ebadf();
+//                     assert_eq!(err.kind(), expected_error.kind(), "1");
+//                     assert_eq!(err.raw_os_error(), expected_error.raw_os_error(), "2");
+//                 }
+//                 other => panic!("Expected ParentPipeReadFailed error, got: {:?}", other),
+//             }
+//         },
+//     );
+// }

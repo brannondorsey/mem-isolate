@@ -144,7 +144,7 @@ mod tests {
     fn fork_mocking() {
         use CallBehavior::Mock;
 
-        let mock = MockableSystemFunctions::with_fallback();
+        let mock = MockableSystemFunctions::strict();
         mock.expect_fork(Mock(Ok(ForkReturn::Parent(123))));
         mock.expect_fork(Mock(Ok(ForkReturn::Child)));
 
@@ -161,10 +161,10 @@ mod tests {
     #[test]
     fn pipe_mocking() {
         with_mock_system(
-            configured_with_fallback(|mock| {
+            configured_strict(|mock| {
                 mock.expect_pipe(CallBehavior::Mock(Ok(PipeFds {
-                    read_fd: 10,
-                    write_fd: 11,
+                    read_fd: 1000,
+                    write_fd: 1001,
                 })))
                 .expect_close(CallBehavior::Mock(Ok(())))
                 .expect_close(CallBehavior::Mock(Ok(())));
@@ -172,8 +172,8 @@ mod tests {
             |mock| {
                 let pipe_fds = mock.pipe().expect("Pipe should succeed");
 
-                assert_eq!(pipe_fds.read_fd, 10);
-                assert_eq!(pipe_fds.write_fd, 11);
+                assert_eq!(pipe_fds.read_fd, 1000);
+                assert_eq!(pipe_fds.write_fd, 1001);
 
                 mock.close(pipe_fds.read_fd).expect("Close should succeed");
                 mock.close(pipe_fds.write_fd).expect("Close should succeed");
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn close_mocking() {
-        let mock = MockableSystemFunctions::with_fallback();
+        let mock = MockableSystemFunctions::strict();
         mock.expect_close(CallBehavior::Mock(Ok(())));
 
         enable_mocking(&mock);
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn waitpid_mocking() {
-        let mock = MockableSystemFunctions::with_fallback();
+        let mock = MockableSystemFunctions::strict();
         mock.expect_waitpid(CallBehavior::Mock(Ok(42)));
 
         enable_mocking(&mock);
@@ -211,7 +211,7 @@ mod tests {
     fn error_conditions() {
         use CallBehavior::Mock;
 
-        let mock = MockableSystemFunctions::with_fallback();
+        let mock = MockableSystemFunctions::strict();
 
         // Set up various error conditions
         mock.expect_fork(Mock(Err(io::Error::from_raw_os_error(libc::EAGAIN))));
