@@ -19,5 +19,9 @@ harness = false
 
 # This enables examples to be treated as tests when running cargo test
 [[example]]
-name = "error-handling"
+name = "error-handling-basic"
+test = true
+
+[[example]]
+name = "error-handling-complete"
 test = true
