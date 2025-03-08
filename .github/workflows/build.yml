@@ -1,0 +1,41 @@
+name: Build
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # selecting a toolchain either by action or manual `rustup` calls should happen
+      # before the cache plugin, as the cache uses the current rustc version as its cache key
+      - name: Install Rust Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+
+      - name: Build
+        run: |
+          # Because this is a library crate, it is best to not use a lockfile
+          # so we are more quickly alerted to breaking changes if a dependency
+          # violates semver.
+          rm Cargo.lock
+          cargo build
+
+      # TODO: Test all permutations of crate features with cargo-hack
+      - name: Test
+        run: cargo test
+
+      - name: Clippy
+        run: cargo clippy
