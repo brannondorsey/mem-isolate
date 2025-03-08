@@ -66,13 +66,14 @@ where
             // NOTE: We chose to panic in the child if we can't communicate an error back to the parent.
             // The parent can then interpret this an an UnexpectedChildDeath.
 
+            // Droping the writer will close the write_fd, so we take it early and explicitly to
+            // prevent use after free with two unsafe calls scattered around the child code below.
+            let mut writer = unsafe { File::from_raw_fd(write_fd) };
+
             // Close the read end of the pipe
             if let Err(close_err) = sys.close(read_fd) {
                 let err = CallableDidNotExecute(ChildPipeCloseFailed(Some(close_err)));
                 let encoded = bincode::serialize(&err).expect("failed to serialize error");
-
-                // TODO: Make sure we uphold the invariant that the write_fd is always open and not shared with anything else.
-                let mut writer = unsafe { File::from_raw_fd(write_fd) };
                 writer
                     .write_all(&encoded)
                     .expect("failed to write error to pipe");
@@ -92,7 +93,6 @@ where
             };
 
             // Write the result to the pipe
-            let mut writer = unsafe { File::from_raw_fd(write_fd) };
             let write_result = writer.write_all(&encoded).and_then(|_| writer.flush());
 
             if let Err(_err) = write_result {
