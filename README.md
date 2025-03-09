@@ -1,5 +1,7 @@
 # `mem-isolate`: *Run unsafe code safely*
 
+[![Build Status](https://github.com/brannondorsey/mem-isolate/actions/workflows/build.yml/badge.svg)](https://github.com/brannondorsey/mem-isolate/actions/workflows/build.yml)
+
 `mem-isolate` runs your function via a `fork()`, waits for the result, and returns it.
 
 This grants your code access to an exact copy of memory and state at the time just before the call, but guarantees that the function will not affect the parent process's memory footprint in any way. It forces functions to be *pure*, even if they aren't.
@@ -28,7 +30,7 @@ Example use cases:
 
 > NOTE: Because of its heavy use of POSIX system calls, this crate only supports Unix-like operating systems (e.g., Linux, macOS, BSD). Windows and wasm support are not planned at this time.
 
-See the [examples/](examples/) for more uses, especially [the basic error handling example](examples/basic-error-handling.rs).
+See the [examples/](examples/) for more uses, especially [the basic error handling example](examples/error-handling-basic.rs).
 
 ## How it works
 
