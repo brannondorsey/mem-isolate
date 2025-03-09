@@ -11,7 +11,11 @@ use std::os::unix::io::FromRawFd;
 mod tests;
 
 mod c;
-use c::{ForkReturn, PipeFds, SystemFunctions};
+use c::{
+    ForkReturn, PipeFds, SystemFunctions, child_process_continued_by_sigcont,
+    child_process_exited_on_its_own, child_process_killed_by_signal,
+    child_process_suspended_by_signal,
+};
 
 pub mod errors;
 pub use errors::MemIsolateError;
@@ -28,9 +32,6 @@ pub use serde::{Serialize, de::DeserializeOwned};
 /// # Safety
 /// This code directly calls glibc functions (via the libc crate) and should
 /// only be used in a Unix environment.
-// TODO: Real error handling with thiserror. Plumbing errors in the child also
-// need to be passed back to the parent. TODO: Benchmark nicing the child
-// process.
 pub fn execute_in_isolated_process<F, T>(callable: F) -> Result<T, MemIsolateError>
 where
     // TODO: Consider restricting to disallow FnMut() closures
@@ -56,7 +57,6 @@ where
     };
 
     // Create a pipe.
-    // TODO: Should I use dup2 somewhere here?
     let PipeFds { read_fd, write_fd } = match sys.pipe() {
         Ok(pipe_fds) => pipe_fds,
         Err(err) => {
@@ -124,24 +124,39 @@ where
             // Wait for the child process to exit
             // TODO: waitpid doesn't return the exit status you expect it to.
             // See the Linux Programming Interface book for more details.
-            let status = match sys.waitpid(child_pid) {
-                Ok(status) => status,
-                Err(wait_err) => {
-                    return Err(CallableStatusUnknown(WaitFailed(wait_err)));
-                }
-            };
+            'waitpid: loop {
+                let waitpid_bespoke_status = match sys.waitpid(child_pid) {
+                    Ok(status) => status,
+                    Err(wait_err) => {
+                        return Err(CallableStatusUnknown(WaitFailed(wait_err)));
+                    }
+                };
 
-            match status {
-                CHILD_EXIT_HAPPY => {}
-                CHILD_EXIT_IF_READ_CLOSE_FAILED => {
-                    return Err(CallableDidNotExecute(ChildPipeCloseFailed(None)));
-                }
-                CHILD_EXIT_IF_WRITE_FAILED => {
-                    return Err(CallableExecuted(ChildPipeWriteFailed(None)));
-                }
-                unhandled_status => {
-                    return Err(CallableStatusUnknown(UnexpectedChildExitStatus(
-                        unhandled_status,
+                if let Some(exit_status) = child_process_exited_on_its_own(waitpid_bespoke_status) {
+                    match exit_status {
+                        CHILD_EXIT_HAPPY => break 'waitpid,
+                        CHILD_EXIT_IF_READ_CLOSE_FAILED => {
+                            return Err(CallableDidNotExecute(ChildPipeCloseFailed(None)));
+                        }
+                        CHILD_EXIT_IF_WRITE_FAILED => {
+                            return Err(CallableExecuted(ChildPipeWriteFailed(None)));
+                        }
+                        unhandled_status => {
+                            return Err(CallableStatusUnknown(UnexpectedChildExitStatus(
+                                unhandled_status,
+                            )));
+                        }
+                    }
+                } else if let Some(signal) = child_process_killed_by_signal(waitpid_bespoke_status)
+                {
+                    return Err(CallableStatusUnknown(ChildProcessKilledBySignal(signal)));
+                } else if child_process_suspended_by_signal(waitpid_bespoke_status).is_some()
+                    || child_process_continued_by_sigcont(waitpid_bespoke_status)
+                {
+                    continue 'waitpid;
+                } else {
+                    return Err(CallableStatusUnknown(UnexpectedWaitpidReturnValue(
+                        waitpid_bespoke_status,
                     )));
                 }
             }

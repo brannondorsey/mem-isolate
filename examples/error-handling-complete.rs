@@ -22,6 +22,8 @@ fn main() {
         Err(CallableStatusUnknown(ParentPipeReadFailed(_err))) => {}
         Err(CallableStatusUnknown(CallableProcessDiedDuringExecution)) => {}
         Err(CallableStatusUnknown(UnexpectedChildExitStatus(_status))) => {}
+        Err(CallableStatusUnknown(ChildProcessKilledBySignal(_signal))) => {}
+        Err(CallableStatusUnknown(UnexpectedWaitpidReturnValue(_status))) => {}
     };
 }
 

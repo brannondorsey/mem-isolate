@@ -83,6 +83,42 @@ impl SystemFunctions for RealSystemFunctions {
     }
 }
 
+pub type WaitpidStatus = libc::c_int;
+pub type ExitStatus = libc::c_int;
+pub type Signal = libc::c_int;
+
+#[inline]
+pub fn child_process_exited_on_its_own(waitpid_status: WaitpidStatus) -> Option<ExitStatus> {
+    if libc::WIFEXITED(waitpid_status) {
+        Some(libc::WEXITSTATUS(waitpid_status))
+    } else {
+        None
+    }
+}
+
+#[inline]
+pub fn child_process_killed_by_signal(waitpid_status: WaitpidStatus) -> Option<Signal> {
+    if libc::WIFSIGNALED(waitpid_status) {
+        Some(libc::WTERMSIG(waitpid_status))
+    } else {
+        None
+    }
+}
+
+#[inline]
+pub fn child_process_suspended_by_signal(waitpid_status: WaitpidStatus) -> Option<Signal> {
+    if libc::WIFSTOPPED(waitpid_status) {
+        Some(libc::WSTOPSIG(waitpid_status))
+    } else {
+        None
+    }
+}
+
+#[inline]
+pub fn child_process_continued_by_sigcont(waitpid_status: WaitpidStatus) -> bool {
+    libc::WIFCONTINUED(waitpid_status)
+}
+
 // For test builds, these functions will be provided by the mock module
 #[cfg(test)]
 mod tests {
