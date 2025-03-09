@@ -1,8 +1,8 @@
-# mem-isolate: Run unsafe code safely
+# `mem-isolate`: *Run unsafe code safely*
 
 `mem-isolate` runs your function via a `fork()`, waits for the result, and returns it.
 
-This grants your code access to an exact copy of memory and state at the time just before the call, but guarantees that the function will not affect the parent process in any way. It forces functions to be pure, even if they aren't.
+This grants your code access to an exact copy of memory and state at the time just before the call, but guarantees that the function will not affect the parent process's memory footprint in any way. It forces functions to be *pure*, even if they aren't.
 
 ```rust
 use mem_isolate::execute_in_isolated_process;
@@ -21,13 +21,14 @@ let result = mem_isolate::execute_in_isolated_process(|| {
 
 Example use cases:
 
-* Running code with a known memory leak
-* Running code that fragments the heap
-* Running `unsafe` code
+* Run code with a known memory leak
+* Run code that fragments the heap
+* Run `unsafe` code
+* Run your code 1ms slower (*har har* 😉, see [limitations](#limitations))
 
 > NOTE: Because of its heavy use of POSIX system calls, this crate only supports Unix-like operating systems (e.g., Linux, macOS, BSD). Windows and wasm support are not planned at this time.
 
-See the [examples/](https://github.com/joshlf/mem-isolate/tree/main/examples) for more uses.
+See the [examples/](examples/) for more uses, especially [the basic error handling example](examples/basic-error-handling.rs).
 
 ## How it works
 
@@ -37,7 +38,7 @@ POSIX systems use the `fork()` system call to create a new child process that is
 
 When `execute_in_isolated_process()` is called, the process will:
 
-1. Create a `pipe()` for inter-process communication between the process _it_ has been invoked in (the "parent") and the new child process that will be created to isolate and run your `callable`
+1. Create a `pipe()` for inter-process communication between the process *it* has been invoked in (the "parent") and the new child process that will be created to isolate and run your `callable`
 1. `fork()` a new child process
 1. Execute the user-supplied `callable` in the child process and deliver its result back to the parent process through the pipe
 1. Wait for the child process to finish with `waitpid()`
