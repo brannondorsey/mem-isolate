@@ -2,7 +2,7 @@
 
 `mem-isolate` runs your function via a `fork()`, waits for the result, and returns it.
 
-This grants your code access to an exact copy of memory and state at the time just before the call, but gaurantees that the function will not affect the parent process in any way. It forces functions to be pure, even if they aren't.
+This grants your code access to an exact copy of memory and state at the time just before the call, but guarantees that the function will not affect the parent process in any way. It forces functions to be pure, even if they aren't.
 
 ```rust
 use mem_isolate::execute_in_isolated_process;
@@ -25,16 +25,37 @@ Example use cases:
 * Running code that fragments the heap
 * Running `unsafe` code
 
+> NOTE: Because of its heavy use of POSIX system calls, this crate only supports Unix-like operating systems (e.g., Linux, macOS, BSD). Windows and wasm support are not planned at this time.
+
+See the [examples/](https://github.com/joshlf/mem-isolate/tree/main/examples) for more uses.
+
 ## How it works
 
-TODO
-blah blah blah
+POSIX systems use the `fork()` system call to create a new child process that is a copy of the parent. On modern systems, this is relatively cheap (~1ms) even if the parent process is using a lot of memory at the time of the call. This is because the OS uses copy-on-write memory techniques to avoid duplicating the entire memory of the parent process. At the time `fork()` is called, the parent and child all share the same physical pages in memory. Only when one of them modifies a page is it copied to a new location.
 
-We call this the "fork and free" pattern.
+`mem-isolate` uses this implementation detail as a nifty hack to provide a `callable` function with a temporary and isolated memory space. You can think of this isolation almost like a snapshot is taken of your program's memory at the time `execute_in_isolated_process()` is called, which will be restored once the user-supplied `callable` function has finished executing.
+
+When `execute_in_isolated_process()` is called, the process will:
+
+1. Create a `pipe()` for inter-process communication between the process _it_ has been invoked in (the "parent") and the new child process that will be created to isolate and run your `callable`
+1. `fork()` a new child process
+1. Execute the user-supplied `callable` in the child process and deliver its result back to the parent process through the pipe
+1. Wait for the child process to finish with `waitpid()`
+1. Return the result to the parent process
+
+We call this trick the "fork and free" pattern. It's pretty nifty. 🫰
+
+## Limitations
+
+* Works only on POSIX systems (Linux, macOS, BSD)
+* Data returned from the `callable` function must be serialized to and from the child process (using `serde`), which can be expensive for large data.
+* Excluding serialization/deserialization cost, `execute_in_isolated_process()` introduces runtime overhead on the order of ~1ms compared to a direct invocation of the `callable`.
+
+In performance critical systems, these overheads can be no joke. However, for many use cases, this is an affordable trade-off for the memory safety and snapshotting behavior that `mem-isolate` provides.
 
 ## Benchmarks
 
-Raw function calls are ~1.5ns, forks() + wait is ~1.7ms, and my unoptimized `execute_in_isolated_process()` is about 1.9ms. Slow, but tolerable for many use cases.
+In a [simple benchmark](benches/benchmarks.rs), raw function calls are ~1.5ns, `fork()` + wait is ~1.7ms, and `execute_in_isolated_process()` is about 1.9ms. That's very slow by comparison, but tolerable for many use cases where memory safety is paramount.
 
 ```txt
 cargo bench
@@ -69,3 +90,20 @@ Overhead/execute_in_isolated_process
 Found 1 outliers among 100 measurements (1.00%)
   1 (1.00%) low severe
 ```
+
+All benchmarks were run on a ThinkPad T14 Gen 4 AMD (14″) laptop with a AMD Ryzen 5 PRO 7540U CPU @ 3.2Ghz max clock speed and 32 GB of RAM. The OS used was Debian 13 with Linux kernel 6.12.
+
+## License
+
+`mem-isolate` is dual-licensed under either of:
+
+* [MIT license](https://opensource.org/license/mit)
+* [Apache License, Version 2.0](https://opensource.org/license/apache-2-0)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you shall be dual licensed as above, without any
+additional terms or conditions.
