@@ -105,20 +105,6 @@ pub fn child_process_killed_by_signal(waitpid_status: WaitpidStatus) -> Option<S
     }
 }
 
-#[inline]
-pub fn child_process_suspended_by_signal(waitpid_status: WaitpidStatus) -> Option<Signal> {
-    if libc::WIFSTOPPED(waitpid_status) {
-        Some(libc::WSTOPSIG(waitpid_status))
-    } else {
-        None
-    }
-}
-
-#[inline]
-pub fn child_process_continued_by_sigcont(waitpid_status: WaitpidStatus) -> bool {
-    libc::WIFCONTINUED(waitpid_status)
-}
-
 // For test builds, these functions will be provided by the mock module
 #[cfg(test)]
 mod tests {

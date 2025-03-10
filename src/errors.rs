@@ -36,6 +36,7 @@ use thiserror::Error;
 /// [`MemIsolateError`] is the **primary error type returned by the crate**. The
 /// goal is to give the caller context about what happened to their callable if
 /// something went wrong.
+// TODO: Consider making this Send + Sync
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum MemIsolateError {
     /// Indicates something went wrong before the callable was executed. Because

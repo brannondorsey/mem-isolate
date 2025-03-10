@@ -12,9 +12,8 @@ mod tests;
 
 mod c;
 use c::{
-    ForkReturn, PipeFds, SystemFunctions, child_process_continued_by_sigcont,
-    child_process_exited_on_its_own, child_process_killed_by_signal,
-    child_process_suspended_by_signal,
+    ForkReturn, PipeFds, SystemFunctions, child_process_exited_on_its_own,
+    child_process_killed_by_signal,
 };
 
 pub mod errors;
@@ -124,41 +123,34 @@ where
             // Wait for the child process to exit
             // TODO: waitpid doesn't return the exit status you expect it to.
             // See the Linux Programming Interface book for more details.
-            'waitpid: loop {
-                let waitpid_bespoke_status = match sys.waitpid(child_pid) {
-                    Ok(status) => status,
-                    Err(wait_err) => {
-                        return Err(CallableStatusUnknown(WaitFailed(wait_err)));
-                    }
-                };
-
-                if let Some(exit_status) = child_process_exited_on_its_own(waitpid_bespoke_status) {
-                    match exit_status {
-                        CHILD_EXIT_HAPPY => break 'waitpid,
-                        CHILD_EXIT_IF_READ_CLOSE_FAILED => {
-                            return Err(CallableDidNotExecute(ChildPipeCloseFailed(None)));
-                        }
-                        CHILD_EXIT_IF_WRITE_FAILED => {
-                            return Err(CallableExecuted(ChildPipeWriteFailed(None)));
-                        }
-                        unhandled_status => {
-                            return Err(CallableStatusUnknown(UnexpectedChildExitStatus(
-                                unhandled_status,
-                            )));
-                        }
-                    }
-                } else if let Some(signal) = child_process_killed_by_signal(waitpid_bespoke_status)
-                {
-                    return Err(CallableStatusUnknown(ChildProcessKilledBySignal(signal)));
-                } else if child_process_suspended_by_signal(waitpid_bespoke_status).is_some()
-                    || child_process_continued_by_sigcont(waitpid_bespoke_status)
-                {
-                    continue 'waitpid;
-                } else {
-                    return Err(CallableStatusUnknown(UnexpectedWaitpidReturnValue(
-                        waitpid_bespoke_status,
-                    )));
+            let waitpid_bespoke_status = match sys.waitpid(child_pid) {
+                Ok(status) => status,
+                Err(wait_err) => {
+                    return Err(CallableStatusUnknown(WaitFailed(wait_err)));
                 }
+            };
+
+            if let Some(exit_status) = child_process_exited_on_its_own(waitpid_bespoke_status) {
+                match exit_status {
+                    CHILD_EXIT_HAPPY => {}
+                    CHILD_EXIT_IF_READ_CLOSE_FAILED => {
+                        return Err(CallableDidNotExecute(ChildPipeCloseFailed(None)));
+                    }
+                    CHILD_EXIT_IF_WRITE_FAILED => {
+                        return Err(CallableExecuted(ChildPipeWriteFailed(None)));
+                    }
+                    unhandled_status => {
+                        return Err(CallableStatusUnknown(UnexpectedChildExitStatus(
+                            unhandled_status,
+                        )));
+                    }
+                }
+            } else if let Some(signal) = child_process_killed_by_signal(waitpid_bespoke_status) {
+                return Err(CallableStatusUnknown(ChildProcessKilledBySignal(signal)));
+            } else {
+                return Err(CallableStatusUnknown(UnexpectedWaitpidReturnValue(
+                    waitpid_bespoke_status,
+                )));
             }
 
             // Read from the pipe by wrapping the read fd as a File

@@ -5,7 +5,15 @@ use crate::c::mock::{
 };
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use std::fs;
 use std::io;
+use std::path::Path;
+use std::process;
+use std::sync::mpsc::channel;
+use std::thread;
+use std::time;
+use std::time::Duration;
+use tempfile::NamedTempFile;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct MyResult {
@@ -22,6 +30,42 @@ fn error_eagain() -> io::Error {
 
 fn error_enfile() -> io::Error {
     io::Error::from_raw_os_error(libc::ENFILE)
+}
+
+fn write_pid_to_file(path: &Path) -> io::Result<()> {
+    let pid: u32 = process::id();
+    fs::write(path, format!("{}\n", pid))
+}
+
+#[derive(Debug, PartialEq)]
+enum WaitForPidfileToPopulateResult {
+    Success(i32),
+    Timeout,
+    Error(std::num::ParseIntError),
+}
+
+fn wait_for_pidfile_to_populate(
+    path_with_eventual_pid: &Path,
+    timeout: Duration,
+) -> WaitForPidfileToPopulateResult {
+    let start = time::Instant::now();
+    // Read the child pid from the temp file
+    loop {
+        if start.elapsed() >= timeout {
+            return WaitForPidfileToPopulateResult::Timeout;
+        }
+        if let Ok(child_pid) = fs::read_to_string(path_with_eventual_pid) {
+            if child_pid.ends_with('\n') {
+                match child_pid.trim().parse::<i32>() {
+                    Ok(pid) => return WaitForPidfileToPopulateResult::Success(pid),
+                    Err(e) => return WaitForPidfileToPopulateResult::Error(e),
+                }
+            } else {
+                continue;
+            }
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 // TODO: Add test for memory leaks with Box::leak(). My first attempt at this proved challenging only in the detection mechanism.
@@ -338,3 +382,104 @@ fn parent_pipe_close_failure() {
 //         },
 //     );
 // }
+
+#[test]
+fn waitpid_child_process_exited_on_its_own() {
+    // The default case
+    execute_in_isolated_process(|| {}).unwrap()
+}
+
+#[test]
+fn waitpid_child_killed_by_signal() {
+    let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
+    let tmp_path_clone = tmp_file.path().to_path_buf().clone();
+
+    let callable = move || {
+        write_pid_to_file(&tmp_path_clone).expect("Failed to write pid to temp file");
+        // Wait for SIGTERM by parking the thread
+        loop {
+            thread::park();
+        }
+        #[allow(unreachable_code)]
+        ()
+    };
+
+    let (tx, rx) = channel();
+    thread::spawn(move || {
+        let result = execute_in_isolated_process(callable);
+        tx.send(result)
+    });
+
+    let timeout = Duration::from_secs(2);
+    if let WaitForPidfileToPopulateResult::Success(child_pid) =
+        wait_for_pidfile_to_populate(tmp_file.path(), timeout)
+    {
+        // SIGTERM the child
+        unsafe {
+            libc::kill(child_pid, libc::SIGTERM);
+        }
+    } else {
+        panic!("Failed to retrieve child pid from temp file");
+    }
+
+    let result = rx.recv().unwrap();
+    assert!(matches!(
+        result,
+        Err(MemIsolateError::CallableStatusUnknown(
+            CallableStatusUnknownError::ChildProcessKilledBySignal(libc::SIGTERM)
+        ))
+    ));
+}
+
+#[test]
+fn waitpid_child_killed_by_signal_after_suspension_and_continuation() {
+    let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
+    let tmp_path_clone = tmp_file.path().to_path_buf().clone();
+
+    let callable = move || {
+        write_pid_to_file(&tmp_path_clone).expect("Failed to write pid to temp file");
+        // Wait for SIGTERM by parking the thread
+        loop {
+            thread::park();
+        }
+        #[allow(unreachable_code)]
+        ()
+    };
+
+    let (tx, rx) = channel();
+    thread::spawn(move || {
+        let result = execute_in_isolated_process(callable);
+        tx.send(result)
+    });
+
+    let timeout = Duration::from_secs(2);
+    if let WaitForPidfileToPopulateResult::Success(child_pid) =
+        wait_for_pidfile_to_populate(tmp_file.path(), timeout)
+    {
+        unsafe {
+            libc::kill(child_pid, libc::SIGSTOP);
+        }
+
+        thread::sleep(Duration::from_millis(100));
+        unsafe {
+            libc::kill(child_pid, libc::SIGCONT);
+        }
+
+        thread::sleep(Duration::from_millis(100));
+        // No reason to choose SIGKILL here other than we already tested SIGTERM
+        unsafe {
+            libc::kill(child_pid, libc::SIGKILL);
+        }
+    } else {
+        panic!("Failed to retrieve child pid from temp file");
+    }
+
+    let result = rx.recv().unwrap();
+    println!("result: {:?}", result);
+    assert!(matches!(
+        result,
+        Err(MemIsolateError::CallableStatusUnknown(
+            CallableStatusUnknownError::ChildProcessKilledBySignal(libc::SIGKILL)
+        ))
+    ));
+}
