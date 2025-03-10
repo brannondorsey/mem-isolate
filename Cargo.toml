@@ -14,10 +14,10 @@ exclude = [
 ]
 
 [dependencies]
-bincode = "1.3.3"
-libc = "0.2.170"
-serde = { version = "1.0.218", features = ["derive"] }
-thiserror = "2.0.11"
+bincode = "1"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
 
 [dev-dependencies]
 criterion = "0.5.1"
