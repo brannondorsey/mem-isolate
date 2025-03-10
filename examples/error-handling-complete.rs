@@ -1,3 +1,7 @@
+//! This example is meant to show you all of the possible errors that can occur
+//! when using `execute_in_isolated_process()`.
+//!
+//! It doesn't actually do anything meaningful
 use MemIsolateError::*;
 use mem_isolate::errors::CallableDidNotExecuteError::*;
 use mem_isolate::errors::CallableExecutedError::*;
@@ -22,6 +26,8 @@ fn main() {
         Err(CallableStatusUnknown(ParentPipeReadFailed(_err))) => {}
         Err(CallableStatusUnknown(CallableProcessDiedDuringExecution)) => {}
         Err(CallableStatusUnknown(UnexpectedChildExitStatus(_status))) => {}
+        Err(CallableStatusUnknown(ChildProcessKilledBySignal(_signal))) => {}
+        Err(CallableStatusUnknown(UnexpectedWaitpidReturnValue(_val))) => {}
     };
 }
 

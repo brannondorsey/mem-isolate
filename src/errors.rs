@@ -36,6 +36,7 @@ use thiserror::Error;
 /// [`MemIsolateError`] is the **primary error type returned by the crate**. The
 /// goal is to give the caller context about what happened to their callable if
 /// something went wrong.
+// TODO: Consider making this Send + Sync
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum MemIsolateError {
     /// Indicates something went wrong before the callable was executed. Because
@@ -165,6 +166,15 @@ pub enum CallableStatusUnknownError {
     /// indicating the success or failure of the user-supplied callable itself.
     #[error("the callable process exited with an unexpected status: {0}")]
     UnexpectedChildExitStatus(i32),
+
+    /// The child process responsible for executing the user-supplied callable
+    /// was killed by a signal
+    #[error("the callable process was killed by a signal: {0}")]
+    ChildProcessKilledBySignal(i32),
+
+    /// Waitpid returned an unexpected value
+    #[error("waitpid returned an unexpected value: {0}")]
+    UnexpectedWaitpidReturnValue(i32),
 }
 
 fn serialize_os_error<S>(error: &io::Error, serializer: S) -> Result<S::Ok, S::Error>
