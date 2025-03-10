@@ -49,7 +49,6 @@ fn wait_for_pidfile_to_populate(
     timeout: Duration,
 ) -> WaitForPidfileToPopulateResult {
     let start = time::Instant::now();
-    // Read the child pid from the temp file
     loop {
         if start.elapsed() >= timeout {
             return WaitForPidfileToPopulateResult::Timeout;
@@ -475,7 +474,6 @@ fn waitpid_child_killed_by_signal_after_suspension_and_continuation() {
     }
 
     let result = rx.recv().unwrap();
-    println!("result: {:?}", result);
     assert!(matches!(
         result,
         Err(MemIsolateError::CallableStatusUnknown(
