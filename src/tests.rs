@@ -67,8 +67,6 @@ fn wait_for_pidfile_to_populate(
     }
 }
 
-// TODO: Add test for memory leaks with Box::leak(). My first attempt at this proved challenging only in the detection mechanism.
-
 #[test]
 fn simple_example() {
     let result = execute_in_isolated_process(|| MyResult { value: 42 }).unwrap();
@@ -105,6 +103,54 @@ fn static_memory_mutation_with_isolation() {
             !MEMORY,
             "Static memory should remain unmodified in parent process"
         );
+    }
+}
+
+#[test]
+fn isolate_memory_leak() {
+    let leaky_fn = || {
+        // Leak 1KiB of memory
+        let data: Vec<u8> = vec![42; 1024];
+        let data = Box::new(data);
+        let uh_oh = Box::leak(data);
+        let leaked_ptr = format!("{:p}", uh_oh);
+        assert!(
+            check_memory_exists_and_holds_vec_data(&leaked_ptr),
+            "The memory should exist in `leaky_fn()` where it was leaked"
+        );
+        leaked_ptr
+    };
+
+    let leaked_ptr: String = execute_in_isolated_process(leaky_fn).unwrap();
+    assert!(
+        !check_memory_exists_and_holds_vec_data(&leaked_ptr),
+        "The leaked memory doesn't exist out here though"
+    );
+
+    fn check_memory_exists_and_holds_vec_data(ptr_str: &str) -> bool {
+        let addr = usize::from_str_radix(ptr_str.trim_start_matches("0x"), 16).unwrap();
+        let vec_ptr = addr as *const Vec<u8>;
+
+        if vec_ptr.is_null() {
+            return false;
+        }
+
+        // Use a recovery mechanism to safely check memory
+        std::panic::catch_unwind(|| {
+            // Safety: We're verifying if memory exists and has expected properties
+            unsafe {
+                let vec = &*vec_ptr;
+                if vec.capacity() != 1024 || vec.len() != 1024 {
+                    return false;
+                }
+                if vec.first() != Some(&42) {
+                    return false;
+                }
+                // Memory exists and has the expected properties
+                true
+            }
+        })
+        .unwrap_or(false)
     }
 }
 
