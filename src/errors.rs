@@ -1,6 +1,6 @@
 //! Error handling is an important part of the `mem-isolate` crate. If something
 //! went wrong, we want to give the caller as much context as possible about how
-//! that error effected their `callable`, so they are well-equipped to know what
+//! that error affected their `callable`, so they are well-equipped to know what
 //! to do about it.
 //!
 //! The primary error type is [`MemIsolateError`], which is returned by
@@ -36,11 +36,17 @@ use thiserror::Error;
 /// [`MemIsolateError`] is the **primary error type returned by the crate**. The
 /// goal is to give the caller context about what happened to their callable if
 /// something went wrong.
+///
+/// For basic usage, and an introduction of how you should think about error
+/// handling with this crate, see
+/// [`examples/error-handling-basic.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/examples/error-handling-basic.rs)
+///
+/// For an exhaustive look of all possible error variants, see [`examples/error-handling-complete.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/examples/error-handling-complete.rs)
 // TODO: Consider making this Send + Sync
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum MemIsolateError {
     /// Indicates something went wrong before the callable was executed. Because
-    /// the callable never executed, it should be safe to naively retry the the
+    /// the callable never executed, it should be safe to naively retry the
     /// callable with or without mem-isolate, even if the function is not
     /// idempotent.
     #[error("an error occurred before the callable was executed: {0}")]
@@ -51,7 +57,7 @@ pub enum MemIsolateError {
     #[error("an error occurred after the callable was executed: {0}")]
     CallableExecuted(#[source] CallableExecutedError),
 
-    /// Indicates something went wrong, but it is unknown wether the callable was
+    /// Indicates something went wrong, but it is unknown whether the callable was
     /// executed. **You should retry the callable only if it is idempotent.**
     #[error("the callable process exited with an unknown status: {0}")]
     CallableStatusUnknown(#[source] CallableStatusUnknownError),
@@ -93,7 +99,7 @@ pub enum CallableDidNotExecuteError {
     // That rules out a ton of overloaded io::Error posibilities. It's more
     // precise. WARNING: Serialization will fail if this is not an OS error.
     //
-    /// A system error ocurred while creating the pipe used to communicate with
+    /// A system error occurred while creating the pipe used to communicate with
     /// the child process
     #[serde(
         serialize_with = "serialize_os_error",
@@ -104,7 +110,7 @@ pub enum CallableDidNotExecuteError {
     )]
     PipeCreationFailed(#[source] io::Error),
 
-    /// A system error ocurred while closing the child process's copy of the
+    /// A system error occurred while closing the child process's copy of the
     /// pipe's read end
     #[serde(
         serialize_with = "serialize_option_os_error",
@@ -113,7 +119,7 @@ pub enum CallableDidNotExecuteError {
     #[error("system error encountered closing the child's copy of the pipe's read end: {}", format_option_error(.0))]
     ChildPipeCloseFailed(#[source] Option<io::Error>),
 
-    /// A system error ocurred while forking the child process which is used to
+    /// A system error occurred while forking the child process which is used to
     /// execute user-supplied callable
     #[serde(
         serialize_with = "serialize_os_error",
@@ -124,13 +130,13 @@ pub enum CallableDidNotExecuteError {
 }
 
 /// An error indicating that something went wrong in a way where it is difficult
-/// or impossible to determine wether the user-supplied callable was executed
+/// or impossible to determine whether the user-supplied callable was executed
 /// `¯\_(ツ)_/¯`
 ///
 /// You should only retry the callable if it is idempotent.
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub enum CallableStatusUnknownError {
-    /// A system error ocurred while closing the parent's copy of the pipe's
+    /// A system error occurred while closing the parent's copy of the pipe's
     /// write end
     #[serde(
         serialize_with = "serialize_os_error",
@@ -139,7 +145,7 @@ pub enum CallableStatusUnknownError {
     #[error("system error encountered closing the parent's copy of the pipe's write end: {0}")]
     ParentPipeCloseFailed(#[source] io::Error),
 
-    /// A system error ocurred while waiting for the child process to exit
+    /// A system error occurred while waiting for the child process to exit
     #[serde(
         serialize_with = "serialize_os_error",
         deserialize_with = "deserialize_os_error"
@@ -147,7 +153,7 @@ pub enum CallableStatusUnknownError {
     #[error("system error encountered waiting for the child process: {0}")]
     WaitFailed(#[source] io::Error),
 
-    /// A system error ocurred while reading the child's result from the pipe
+    /// A system error occurred while reading the child's result from the pipe
     #[serde(
         serialize_with = "serialize_os_error",
         deserialize_with = "deserialize_os_error"
