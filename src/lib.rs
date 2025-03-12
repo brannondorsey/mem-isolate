@@ -1,3 +1,43 @@
+//! # `mem-isolate`: *Run unsafe code safely*
+//!
+//! It runs your function via a `fork()`, waits for the result, and
+//! returns it.
+//!
+//! This grants your code access to an exact copy of memory and state at the
+//! time just before the call, but guarantees that the function will not affect
+//! the parent process's memory footprint in any way. It forces functions to be
+//! *pure*, even if they aren't.
+//!
+//! ```
+//! use mem_isolate::execute_in_isolated_process;
+//!
+//! // No heap, stack, or program memory out here...
+//! let result = mem_isolate::execute_in_isolated_process(|| {
+//!     // ...Can be affected by anything in here
+//!     Box::leak(Box::new(vec![42; 1024]));
+//! });
+//! ```
+//!
+//! To keep things simple, this crate exposes only two public interfaces:
+//!
+//! * [`execute_in_isolated_process`] - The function that executes your code in
+//!   an isolated process.
+//! * [`MemIsolateError`] - The error type that function returns ☝️
+//!
+//! For more code examples, see [`examples/`](https://github.com/brannondorsey/mem-isolate/tree/main/examples).
+//! [This one](https://github.com/brannondorsey/mem-isolate/blob/main/examples/error-handling-basic.rs)
+//! in particular shows how you should think about error handling.
+//!
+//! For more information, see the [README](https://github.com/brannondorsey/mem-isolate).
+//!
+//! ## Supported platforms
+//!
+//! Because of its heavy use of POSIX system calls, this crate only
+//! supports Unix-like operating systems (e.g. Linux, macOS, BSD).
+//!
+//! Windows and wasm support are not planned at this time.
+#![warn(missing_docs)]
+
 #[cfg(not(any(target_family = "unix")))]
 compile_error!(
     "Because of its heavy use of POSIX system calls, this crate only supports Unix-like operating systems (e.g. Linux, macOS, BSD)"
@@ -28,12 +68,87 @@ pub use serde::{Serialize, de::DeserializeOwned};
 /// serializes its result (using bincode) and writes it through a pipe, which
 /// the parent reads and deserializes.
 ///
-/// # Safety
-/// This code directly calls glibc functions (via the libc crate) and should
-/// only be used in a Unix environment.
+/// # Example
+///
+/// ```rust
+/// use mem_isolate::execute_in_isolated_process;
+///
+/// let leaky_fn = || {
+///     // Leak 1KiB of memory
+///     let data: Vec<u8> = Vec::with_capacity(1024);
+///     let data = Box::new(data);
+///     Box::leak(data);
+/// };
+///
+/// let _ = execute_in_isolated_process(leaky_fn);
+/// // However, the memory is not leaked in the parent process here
+/// ```
+///
+/// # Error Handling
+///
+/// Error handling is organized into three levels:
+///
+/// 1. The first level describes the effect of the error on the `callable` (e.g.
+///    did your callable function execute or not)
+/// 2. The second level describes what `mem-isolate` operation caused the error
+///    (e.g. did serialization fail)
+/// 3. The third level is the underlying OS error if it is available (e.g. an
+///    `io::Error`)
+///
+/// For most applications, you'll care only about the first level:
+///
+/// ```rust
+/// use mem_isolate::{execute_in_isolated_process, MemIsolateError};
+///
+/// // Function that might cause memory issues
+/// let result = execute_in_isolated_process(|| {
+///     // Some operation
+///     "Success!".to_string()
+/// });
+///
+/// match result {
+///     Ok(value) => println!("Callable succeeded: {}", value),
+///     Err(MemIsolateError::CallableDidNotExecute(_)) => {
+///         // Safe to retry, callable never executed
+///         println!("Callable did not execute, can safely retry");
+///     },
+///     Err(MemIsolateError::CallableExecuted(_)) => {
+///         // Do not retry unless idempotent
+///         println!("Callable executed but result couldn't be returned");
+///     },
+///     Err(MemIsolateError::CallableStatusUnknown(_)) => {
+///         // Retry only if idempotent
+///         println!("Unknown if callable executed, retry only if idempotent");
+///     }
+/// }
+/// ```
+///
+/// For a more detailed look at error handling, see the documentation in the
+/// [`errors`] module.
+///
+/// ## Important Note on Closures
+///
+/// When using closures that capture and mutate variables from their environment,
+/// these mutations **only occur in the isolated child process** and do not affect
+/// the parent process's memory. For example, it may seem surprising that the
+/// following code will leave the parent's `counter` variable unchanged:
+///
+/// ```rust
+/// use mem_isolate::execute_in_isolated_process;
+///
+/// let mut counter = 0;
+/// let result = execute_in_isolated_process(|| {
+///     counter += 1;  // This increment only happens in the child process
+///     counter        // Returns 1
+/// });
+/// assert_eq!(counter, 0);  // Parent's counter remains unchanged
+/// ```
+///
+/// This is the intended behavior as the function's purpose is to isolate all
+/// memory effects of the callable. However, this can be surprising, especially
+/// for [`FnMut`] or [`FnOnce`] closures.
 pub fn execute_in_isolated_process<F, T>(callable: F) -> Result<T, MemIsolateError>
 where
-    // TODO: Consider restricting to disallow FnMut() closures
     F: FnOnce() -> T,
     T: Serialize + DeserializeOwned,
 {
@@ -161,7 +276,7 @@ where
             } // The read_fd will automatically be closed when the File is dropped
 
             if buffer.is_empty() {
-                // TODO: How can we more rigerously know this? Maybe we write to a mem map before and after execution?
+                // TODO: How can we more rigorously know this? Maybe we write to a mem map before and after execution?
                 return Err(CallableStatusUnknown(CallableProcessDiedDuringExecution));
             }
             // Update the deserialization to handle child errors
