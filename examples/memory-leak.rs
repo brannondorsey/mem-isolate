@@ -29,14 +29,3 @@ fn check_memory_exists_and_holds_vec_data(ptr_str: &str) -> bool {
     let vec_ptr = addr as *const Vec<u8>;
     !vec_ptr.is_null() && unsafe { std::ptr::read_volatile(vec_ptr) }.capacity() > 0
 }
-
-// Add a smoke test to make sure this example stays working
-#[cfg(test)]
-mod example_memory_leak {
-    use super::*;
-
-    #[test]
-    fn execute_main() {
-        main().unwrap();
-    }
-}

@@ -28,7 +28,6 @@ tempfile = "3.18.0"
 name = "benchmarks"
 harness = false
 
-# This enables examples to be treated as tests when running cargo test
 [[example]]
 name = "error-handling-basic"
 test = true
