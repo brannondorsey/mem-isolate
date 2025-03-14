@@ -1,8 +1,13 @@
+#![allow(clippy::unwrap_used)]
+
 use super::*;
 use crate::c::mock::{
     CallBehavior, MockConfig, configured_strict, configured_with_fallback, is_mocking_enabled,
     with_mock_system,
 };
+use errors::CallableDidNotExecuteError;
+use errors::CallableExecutedError;
+use errors::CallableStatusUnknownError;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
@@ -34,7 +39,7 @@ fn error_enfile() -> io::Error {
 
 fn write_pid_to_file(path: &Path) -> io::Result<()> {
     let pid: u32 = process::id();
-    fs::write(path, format!("{}\n", pid))
+    fs::write(path, format!("{pid}\n"))
 }
 
 #[derive(Debug, PartialEq)]
@@ -59,8 +64,6 @@ fn wait_for_pidfile_to_populate(
                     Ok(pid) => return WaitForPidfileToPopulateResult::Success(pid),
                     Err(e) => return WaitForPidfileToPopulateResult::Error(e),
                 }
-            } else {
-                continue;
             }
         }
         thread::sleep(Duration::from_millis(10));
@@ -108,25 +111,6 @@ fn static_memory_mutation_with_isolation() {
 
 #[test]
 fn isolate_memory_leak() {
-    let leaky_fn = || {
-        // Leak 1KiB of memory
-        let data: Vec<u8> = vec![42; 1024];
-        let data = Box::new(data);
-        let uh_oh = Box::leak(data);
-        let leaked_ptr = format!("{:p}", uh_oh);
-        assert!(
-            check_memory_exists_and_holds_vec_data(&leaked_ptr),
-            "The memory should exist in `leaky_fn()` where it was leaked"
-        );
-        leaked_ptr
-    };
-
-    let leaked_ptr: String = execute_in_isolated_process(leaky_fn).unwrap();
-    assert!(
-        !check_memory_exists_and_holds_vec_data(&leaked_ptr),
-        "The leaked memory doesn't exist out here though"
-    );
-
     fn check_memory_exists_and_holds_vec_data(ptr_str: &str) -> bool {
         let addr = usize::from_str_radix(ptr_str.trim_start_matches("0x"), 16).unwrap();
         let vec_ptr = addr as *const Vec<u8>;
@@ -152,6 +136,25 @@ fn isolate_memory_leak() {
         })
         .unwrap_or(false)
     }
+
+    let leaky_fn = || {
+        // Leak 1KiB of memory
+        let data: Vec<u8> = vec![42; 1024];
+        let data = Box::new(data);
+        let uh_oh = Box::leak(data);
+        let leaked_ptr = format!("{uh_oh:p}");
+        assert!(
+            check_memory_exists_and_holds_vec_data(&leaked_ptr),
+            "The memory should exist in `leaky_fn()` where it was leaked"
+        );
+        leaked_ptr
+    };
+
+    let leaked_ptr: String = execute_in_isolated_process(leaky_fn).unwrap();
+    assert!(
+        !check_memory_exists_and_holds_vec_data(&leaked_ptr),
+        "The leaked memory doesn't exist out here though"
+    );
 }
 
 #[test]
@@ -185,6 +188,7 @@ fn all_function_types() {
     let fn_once_closure = move || {
         // This closure takes ownership of value
         MyResult {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
             value: value.len() as i32,
         }
     };
@@ -228,11 +232,10 @@ fn serialization_error() {
         Err(MemIsolateError::CallableExecuted(CallableExecutedError::SerializationFailed(err))) => {
             assert!(
                 err.contains("Fake serialization error"),
-                "Expected error about sequence length, got: {}",
-                err
+                "Expected error about sequence length, got: {err}"
             );
         }
-        other => panic!("Expected SerializationFailed error, got: {:?}", other),
+        other => panic!("Expected SerializationFailed error, got: {other:?}"),
     }
 }
 
@@ -276,11 +279,10 @@ fn deserialization_error() {
         ))) => {
             assert!(
                 err.contains("Intentional deserialization failure"),
-                "Expected custom deserialization error, got: {}",
-                err
+                "Expected custom deserialization error, got: {err}"
             );
         }
-        other => panic!("Expected DeserializationFailed error, got: {:?}", other),
+        other => panic!("Expected DeserializationFailed error, got: {other:?}"),
     }
 }
 
@@ -374,7 +376,7 @@ fn parent_pipe_close_failure() {
                     assert_eq!(err.kind(), expected_error.kind());
                     assert_eq!(err.raw_os_error(), expected_error.raw_os_error());
                 }
-                other => panic!("Expected ParentPipeCloseFailed error, got: {:?}", other),
+                other => panic!("Expected ParentPipeCloseFailed error, got: {other:?}"),
             }
         },
     );
@@ -431,10 +433,11 @@ fn parent_pipe_close_failure() {
 #[test]
 fn waitpid_child_process_exited_on_its_own() {
     // The default case
-    execute_in_isolated_process(|| {}).unwrap()
+    execute_in_isolated_process(|| {}).unwrap();
 }
 
 #[test]
+#[allow(clippy::semicolon_if_nothing_returned)]
 fn waitpid_child_killed_by_signal() {
     let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
     let tmp_path_clone = tmp_file.path().to_path_buf().clone();
@@ -477,6 +480,7 @@ fn waitpid_child_killed_by_signal() {
 }
 
 #[test]
+#[allow(clippy::semicolon_if_nothing_returned)]
 fn waitpid_child_killed_by_signal_after_suspension_and_continuation() {
     let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
     let tmp_path_clone = tmp_file.path().to_path_buf().clone();
