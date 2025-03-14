@@ -37,6 +37,8 @@
 //!
 //! Windows and wasm support are not planned at this time.
 #![warn(missing_docs)]
+#![warn(clippy::pedantic, clippy::unwrap_used)]
+#![warn(missing_debug_implementations)]
 
 #[cfg(not(any(target_family = "unix")))]
 compile_error!(
