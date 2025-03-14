@@ -60,7 +60,16 @@ use c::{
 
 pub mod errors;
 pub use errors::MemIsolateError;
-use errors::{CallableDidNotExecuteError, CallableExecutedError, CallableStatusUnknownError};
+use errors::{
+    CallableDidNotExecuteError::{ChildPipeCloseFailed, ForkFailed, PipeCreationFailed},
+    CallableExecutedError::{ChildPipeWriteFailed, DeserializationFailed, SerializationFailed},
+    CallableStatusUnknownError::{
+        CallableProcessDiedDuringExecution, ChildProcessKilledBySignal, ParentPipeCloseFailed,
+        ParentPipeReadFailed, UnexpectedChildExitStatus, UnexpectedWaitpidReturnValue, WaitFailed,
+    },
+};
+
+use MemIsolateError::{CallableDidNotExecute, CallableExecuted, CallableStatusUnknown};
 
 // Re-export the serde traits our public API depends on
 pub use serde::{Serialize, de::DeserializeOwned};
@@ -86,7 +95,7 @@ pub use serde::{Serialize, de::DeserializeOwned};
 /// // However, the memory is not leaked in the parent process here
 /// ```
 ///
-/// # Error Handling
+/// # Errors
 ///
 /// Error handling is organized into three levels:
 ///
@@ -149,15 +158,17 @@ pub use serde::{Serialize, de::DeserializeOwned};
 /// This is the intended behavior as the function's purpose is to isolate all
 /// memory effects of the callable. However, this can be surprising, especially
 /// for [`FnMut`] or [`FnOnce`] closures.
+#[allow(clippy::missing_panics_doc)] // We have to panic in the child process but clippy can't tell this is OK
+#[allow(clippy::too_many_lines)] // TODO: Break this up for readability
 pub fn execute_in_isolated_process<F, T>(callable: F) -> Result<T, MemIsolateError>
 where
     F: FnOnce() -> T,
     T: Serialize + DeserializeOwned,
 {
-    use CallableDidNotExecuteError::{ChildPipeCloseFailed, ForkFailed, PipeCreationFailed};
-    use CallableExecutedError::{ChildPipeWriteFailed, DeserializationFailed, SerializationFailed};
-    use CallableStatusUnknownError::{CallableProcessDiedDuringExecution, ChildProcessKilledBySignal, ParentPipeCloseFailed, ParentPipeReadFailed, UnexpectedChildExitStatus, UnexpectedWaitpidReturnValue, WaitFailed};
-    use MemIsolateError::{CallableDidNotExecute, CallableExecuted, CallableStatusUnknown};
+    // Statuses 3-63 are normally fair game
+    const CHILD_EXIT_HAPPY: i32 = 0;
+    const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 3;
+    const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
 
     // Use the appropriate implementation based on build config
     #[cfg(not(test))]
@@ -180,11 +191,6 @@ where
         }
     };
 
-    // Statuses 3-63 are normally fair game
-    const CHILD_EXIT_HAPPY: i32 = 0;
-    const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 3;
-    const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
-
     match sys.fork() {
         Err(err) => Err(CallableDidNotExecute(ForkFailed(err))),
         Ok(ForkReturn::Child) => {
@@ -203,6 +209,7 @@ where
                     .write_all(&encoded)
                     .expect("failed to write error to pipe");
                 writer.flush().expect("failed to flush error to pipe");
+                #[allow(clippy::used_underscore_items)]
                 sys._exit(CHILD_EXIT_IF_READ_CLOSE_FAILED);
             }
 
@@ -223,11 +230,13 @@ where
             if let Err(_err) = write_result {
                 // If we can't write to the pipe, we can't communicate the error either
                 // Parent will detect this as an UnexpectedChildDeath
+                #[allow(clippy::used_underscore_items)]
                 sys._exit(CHILD_EXIT_IF_WRITE_FAILED);
             }
 
             // Exit immediately; use _exit to avoid running atexit()/on_exit() handlers
             // and flushing stdio buffers, which are exact clones of the parent in the child process.
+            #[allow(clippy::used_underscore_items)]
             sys._exit(CHILD_EXIT_HAPPY);
             // The code after _exit is unreachable because _exit never returns
         }
