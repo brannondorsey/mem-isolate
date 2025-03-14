@@ -70,7 +70,7 @@ impl SystemFunctions for RealSystemFunctions {
 
     fn waitpid(&self, pid: c_int) -> Result<c_int, io::Error> {
         let mut status: c_int = 0;
-        let ret = unsafe { libc::waitpid(pid, &mut status as *mut c_int, 0) };
+        let ret = unsafe { libc::waitpid(pid, &raw mut status, 0) };
         if ret == -1 {
             Err(io::Error::last_os_error())
         } else {
@@ -108,6 +108,8 @@ pub fn child_process_killed_by_signal(waitpid_status: WaitpidStatus) -> Option<S
 // For test builds, these functions will be provided by the mock module
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+
     use super::*;
     use mock::*;
     use std::io;
@@ -327,6 +329,7 @@ mod tests {
         enable_mocking(&mock);
 
         // This should panic with a specific message
+        #[allow(clippy::used_underscore_items)]
         mock._exit(0);
 
         // WARNING: No disable_mocking() here because its unreachable
@@ -387,7 +390,6 @@ mod tests {
 
                 println!("Second call: Mock implementation");
                 let result2 = sys.fork().expect("Mock fork should succeed");
-                println!("Got result2: {:?}", result2);
                 assert_eq!(result2, ForkReturn::Parent(123));
 
                 println!("Third call: Real implementation");

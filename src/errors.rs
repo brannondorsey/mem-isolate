@@ -202,6 +202,7 @@ where
     Ok(io::Error::from_raw_os_error(s))
 }
 
+#[allow(clippy::ref_option)]
 fn serialize_option_os_error<S>(error: &Option<io::Error>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
@@ -224,6 +225,7 @@ where
     }
 }
 
+#[allow(clippy::ref_option)]
 fn format_option_error(err: &Option<io::Error>) -> String {
     match err {
         Some(e) => e.to_string(),

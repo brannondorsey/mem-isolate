@@ -69,7 +69,7 @@ impl<T: Clone> CallQueue<T> {
         match behavior {
             CallBehavior::Real => queue.push_back(CallImplementation::Real),
             CallBehavior::Mock(result) => {
-                queue.push_back(CallImplementation::Mock(MockResult::from_result(result)))
+                queue.push_back(CallImplementation::Mock(MockResult::from_result(result)));
             }
         }
     }
@@ -195,9 +195,10 @@ impl SystemFunctions for MockableSystemFunctions {
     fn _exit(&self, status: c_int) -> ! {
         if is_mocking_enabled() {
             // In mock context, we panic instead of exiting
-            panic!("_exit({}) called in mock context", status);
+            panic!("_exit({status}) called in mock context");
         } else {
             // Otherwise, use the real implementation
+            #[allow(clippy::used_underscore_items)]
             self.real_impl._exit(status)
         }
     }
@@ -227,7 +228,7 @@ pub fn disable_mocking() {
 
 /// Returns true if mocking is currently enabled for the current thread
 pub fn is_mocking_enabled() -> bool {
-    IS_MOCKING_ENABLED.with(|e| e.get())
+    IS_MOCKING_ENABLED.with(std::cell::Cell::get)
 }
 
 /// Get the current mock from thread-local storage
@@ -288,7 +289,7 @@ pub fn with_mock_system<R>(
     result
 }
 
-/// Helper to create a ConfiguredWithFallback variant
+/// Helper to create a `ConfiguredWithFallback` variant
 pub fn configured_with_fallback<F>(configure_fn: F) -> MockConfig
 where
     F: FnOnce(&MockableSystemFunctions) + 'static,
@@ -296,7 +297,7 @@ where
     MockConfig::ConfiguredWithFallback(Box::new(configure_fn))
 }
 
-/// Helper to create a ConfiguredStrict variant
+/// Helper to create a `ConfiguredStrict` variant
 pub fn configured_strict<F>(configure_fn: F) -> MockConfig
 where
     F: FnOnce(&MockableSystemFunctions) + 'static,
