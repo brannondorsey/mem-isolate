@@ -154,10 +154,10 @@ where
     F: FnOnce() -> T,
     T: Serialize + DeserializeOwned,
 {
-    use CallableDidNotExecuteError::*;
-    use CallableExecutedError::*;
-    use CallableStatusUnknownError::*;
-    use MemIsolateError::*;
+    use CallableDidNotExecuteError::{ChildPipeCloseFailed, ForkFailed, PipeCreationFailed};
+    use CallableExecutedError::{ChildPipeWriteFailed, DeserializationFailed, SerializationFailed};
+    use CallableStatusUnknownError::{CallableProcessDiedDuringExecution, ChildProcessKilledBySignal, ParentPipeCloseFailed, ParentPipeReadFailed, UnexpectedChildExitStatus, UnexpectedWaitpidReturnValue, WaitFailed};
+    use MemIsolateError::{CallableDidNotExecute, CallableExecuted, CallableStatusUnknown};
 
     // Use the appropriate implementation based on build config
     #[cfg(not(test))]
@@ -218,7 +218,7 @@ where
             };
 
             // Write the result to the pipe
-            let write_result = writer.write_all(&encoded).and_then(|_| writer.flush());
+            let write_result = writer.write_all(&encoded).and_then(|()| writer.flush());
 
             if let Err(_err) = write_result {
                 // If we can't write to the pipe, we can't communicate the error either

@@ -70,7 +70,7 @@ impl SystemFunctions for RealSystemFunctions {
 
     fn waitpid(&self, pid: c_int) -> Result<c_int, io::Error> {
         let mut status: c_int = 0;
-        let ret = unsafe { libc::waitpid(pid, &mut status as *mut c_int, 0) };
+        let ret = unsafe { libc::waitpid(pid, &raw mut status, 0) };
         if ret == -1 {
             Err(io::Error::last_os_error())
         } else {
