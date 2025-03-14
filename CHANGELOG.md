@@ -12,4 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Other
 
 - Split LICENSE into LICENSE-MIT and LICENSE-APACHE ([#16](https://github.com/brannondorsey/mem-isolate/pull/16))
+- Pin to release-plz action version for security ([#15](https://github.com/brannondorsey/mem-isolate/pull/15))
+- Run clippy with --all-targets via CI ([#14](https://github.com/brannondorsey/mem-isolate/pull/14))
 - Enable and conform to more strict clippy lints ([#13](https://github.com/brannondorsey/mem-isolate/pull/13))
