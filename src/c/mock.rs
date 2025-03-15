@@ -6,7 +6,7 @@ use std::io;
 use std::thread_local;
 
 // Type for representing a mock result
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum MockResult<T> {
     Ok(T),
     Err(i32), // OS error code
@@ -37,7 +37,7 @@ impl<T> MockResult<T> {
 }
 
 /// Defines how a call should be implemented - real or mocked
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum CallImplementation<T> {
     Real,                // Use real implementation
     Mock(MockResult<T>), // Use mocked result
@@ -50,7 +50,7 @@ pub enum CallBehavior<T> {
 }
 
 /// A generic queue of call implementations
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct CallQueue<T> {
     queue: RefCell<VecDeque<CallImplementation<T>>>,
     name: &'static str, // For better error messages
@@ -93,7 +93,7 @@ impl<T: Clone> CallQueue<T> {
 }
 
 /// Mock implementation that returns predefined values and can fall back to real implementation
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MockableSystemFunctions {
     real_impl: RealSystemFunctions,
     fallback_enabled: Cell<bool>,
