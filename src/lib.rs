@@ -164,7 +164,6 @@ const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
 /// This is the intended behavior as the function's purpose is to isolate all
 /// memory effects of the callable. However, this can be surprising, especially
 /// for [`FnMut`] or [`FnOnce`] closures.
-#[allow(clippy::missing_panics_doc)] // We have to panic in the child process but clippy can't tell this is OK
 #[allow(clippy::too_many_lines)] // TODO: Break this up for readability
 pub fn execute_in_isolated_process<F, T>(callable: F) -> Result<T, MemIsolateError>
 where
