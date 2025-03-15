@@ -211,7 +211,6 @@ where
             exit_happy(&sys)
         }
 
-        // TODO: Pick back up here and finish tracing the parent process
         // Parent process
         Ok(ForkReturn::Parent(child_pid)) => {
             close_write_end_of_pipe_in_parent(&sys, write_fd)?;
