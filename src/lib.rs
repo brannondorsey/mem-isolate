@@ -186,9 +186,6 @@ where
             // using exit codes as the only way to communicate errors.
             // TODO: Get rid of all of the .expect()s
 
-            // Droping the writer will close the write_fd, so we take it early
-            // and explicitly to prevent use after free with two unsafe codes
-            // scattered around the child code below.
             let mut writer = unsafe { File::from_raw_fd(write_fd) };
             close_read_end_of_pipe_in_child_or_exit(&sys, &mut writer, read_fd);
 
