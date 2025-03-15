@@ -70,7 +70,6 @@ use macros::{debug, error};
 use tracing::{Level, instrument, span};
 
 use libc::c_int;
-use std::fmt::Debug;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::io::FromRawFd;
@@ -104,6 +103,7 @@ pub use serde::{Serialize, de::DeserializeOwned};
 const CHILD_EXIT_HAPPY: i32 = 0;
 const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 3;
 const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
+const CHILD_EXIT_IF_SERIALIZATION_FAILED: i32 = 5;
 
 #[cfg(feature = "tracing")]
 const HIGHEST_LEVEL: Level = Level::ERROR;
@@ -214,19 +214,13 @@ where
                 std::mem::drop(parent_span);
                 span!(HIGHEST_LEVEL, "child").entered()
             };
-            // NOTE: Fallible actions in the child must either serialize
-            // and send their error over the pipe, or exit with a code
-            // that can be inerpreted by the parent.
-            // TODO: Consider removing the serializations and just
-            // using exit codes as the only way to communicate errors.
-            // TODO: Get rid of all of the .expect()s
-
-            let mut writer = unsafe { File::from_raw_fd(write_fd) };
-            close_read_end_of_pipe_in_child_or_exit(&sys, &mut writer, read_fd);
+            // NOTE: Fallible actions in the child must exit with a unique
+            // exit code that can be inerpreted by the parent.
+            close_read_end_of_pipe_in_child_or_exit(&sys, read_fd);
 
             let result = execute_callable(callable);
-            let encoded = serialize_result_or_error_value(result);
-            write_and_flush_or_exit(&sys, &mut writer, &encoded);
+            let encoded = serialize_result_or_exit(&sys, result);
+            write_and_flush_or_exit(&sys, write_fd, &encoded);
             exit_happy(&sys)
         }
 
@@ -320,10 +314,9 @@ fn error_if_child_unhappy(waitpid_bespoke_status: WaitpidStatus) -> Result<(), M
     {
         match exit_status {
             CHILD_EXIT_HAPPY => Ok(()),
-            CHILD_EXIT_IF_READ_CLOSE_FAILED => {
-                Err(CallableDidNotExecute(ChildPipeCloseFailed(None)))
-            }
-            CHILD_EXIT_IF_WRITE_FAILED => Err(CallableExecuted(ChildPipeWriteFailed(None))),
+            CHILD_EXIT_IF_READ_CLOSE_FAILED => Err(CallableDidNotExecute(ChildPipeCloseFailed)),
+            CHILD_EXIT_IF_WRITE_FAILED => Err(CallableExecuted(ChildPipeWriteFailed)),
+            CHILD_EXIT_IF_SERIALIZATION_FAILED => Err(CallableExecuted(SerializationFailed)),
             unhandled_status => Err(CallableStatusUnknown(UnexpectedChildExitStatus(
                 unhandled_status,
             ))),
@@ -364,13 +357,8 @@ fn deserialize_result<T: DeserializeOwned>(buffer: &[u8]) -> Result<T, MemIsolat
     }
 }
 
-/// Doesn't matter if the value is an error or not, we just want to serialize it either way
-///
-/// # Panics
-///
-/// Panics if the serialization of a [`MemIsolateError`] fails
 #[cfg_attr(feature = "tracing", instrument(skip(result)))]
-fn serialize_result_or_error_value<T: Serialize>(result: T) -> Vec<u8> {
+fn serialize_result_or_exit<T: Serialize>(sys: &impl SystemFunctions, result: T) -> Vec<u8> {
     match bincode::serialize(&Ok::<T, MemIsolateError>(result)) {
         Ok(encoded) => {
             debug!(
@@ -379,30 +367,20 @@ fn serialize_result_or_error_value<T: Serialize>(result: T) -> Vec<u8> {
             );
             encoded
         }
+        #[allow(unused_variables)]
         Err(err) => {
-            let err = CallableExecuted(SerializationFailed(err.to_string()));
-            error!(
-                "serialization failed, now attempting to serialize error: {:?}",
-                err
-            );
-            #[allow(clippy::let_and_return)]
-            let encoded = bincode::serialize(&Err::<T, MemIsolateError>(err))
-                .expect("failed to serialize error");
-            debug!(
-                "serialization of error successful, resulting in {} bytes",
-                encoded.len()
-            );
-            encoded
+            let error_code = CHILD_EXIT_IF_SERIALIZATION_FAILED;
+            error!("serialization failed: {:?}", err);
+            error!("exiting child process with exit code: {}", error_code);
+            #[allow(clippy::used_underscore_items)]
+            sys._exit(error_code);
         }
     }
 }
 
 #[cfg_attr(feature = "tracing", instrument)]
-fn write_and_flush_or_exit<S, W>(sys: &S, writer: &mut W, buffer: &[u8])
-where
-    S: SystemFunctions,
-    W: Write + Debug,
-{
+fn write_and_flush_or_exit<S: SystemFunctions>(sys: &S, write_fd: c_int, buffer: &[u8]) {
+    let mut writer = unsafe { File::from_raw_fd(write_fd) };
     let result = writer.write_all(buffer).and_then(|()| writer.flush());
     #[allow(unused_variables)]
     if let Err(err) = result {
@@ -474,25 +452,11 @@ fn close_write_end_of_pipe_in_parent<S: SystemFunctions>(
 }
 
 #[cfg_attr(feature = "tracing", instrument)]
-fn close_read_end_of_pipe_in_child_or_exit<S: SystemFunctions>(
-    sys: &S,
-    writer: &mut (impl Write + Debug),
-    read_fd: c_int,
-) {
+fn close_read_end_of_pipe_in_child_or_exit<S: SystemFunctions>(sys: &S, read_fd: c_int) {
+    #[allow(unused_variables)]
     if let Err(close_err) = sys.close(read_fd) {
-        let err = CallableDidNotExecute(ChildPipeCloseFailed(Some(close_err)));
-        error!(
-            "error closing read end of pipe, now attempting to serialize error: {:?}",
-            err
-        );
-
-        let encoded = bincode::serialize(&err).expect("failed to serialize error");
-        writer
-            .write_all(&encoded)
-            .expect("failed to write error to pipe");
-        writer.flush().expect("failed to flush error to pipe");
-
         let exit_code = CHILD_EXIT_IF_READ_CLOSE_FAILED;
+        error!("error closing read end of pipe: {}", close_err);
         error!("exiting child process with exit code: {}", exit_code);
         #[allow(clippy::used_underscore_items)]
         sys._exit(exit_code);

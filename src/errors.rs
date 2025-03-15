@@ -70,9 +70,9 @@ pub enum MemIsolateError {
 pub enum CallableExecutedError {
     /// An error occurred while serializing the result of the callable inside the child process
     #[error(
-        "an error occurred while serializing the result of the callable inside the child process: {0}"
+        "an error occurred while serializing the result of the callable inside the child process"
     )]
-    SerializationFailed(String),
+    SerializationFailed,
 
     /// An error occurred while deserializing the result of the callable in the parent process
     #[error(
@@ -81,12 +81,8 @@ pub enum CallableExecutedError {
     DeserializationFailed(String),
 
     /// A system error occurred while writing the child process's result to the pipe.
-    #[serde(
-        serialize_with = "serialize_option_os_error",
-        deserialize_with = "deserialize_option_os_error"
-    )]
-    #[error("system error encountered writing the child process's result to the pipe: {}", format_option_error(.0))]
-    ChildPipeWriteFailed(#[source] Option<io::Error>),
+    #[error("system error encountered writing the child process's result to the pipe")]
+    ChildPipeWriteFailed,
 }
 
 /// An error indicating something went wrong **before** the user-supplied
@@ -112,12 +108,8 @@ pub enum CallableDidNotExecuteError {
 
     /// A system error occurred while closing the child process's copy of the
     /// pipe's read end
-    #[serde(
-        serialize_with = "serialize_option_os_error",
-        deserialize_with = "deserialize_option_os_error"
-    )]
-    #[error("system error encountered closing the child's copy of the pipe's read end: {}", format_option_error(.0))]
-    ChildPipeCloseFailed(#[source] Option<io::Error>),
+    #[error("system error encountered closing the child's copy of the pipe's read end")]
+    ChildPipeCloseFailed,
 
     /// A system error occurred while forking the child process which is used to
     /// execute user-supplied callable
@@ -200,35 +192,4 @@ where
 {
     let s: i32 = i32::deserialize(deserializer)?;
     Ok(io::Error::from_raw_os_error(s))
-}
-
-#[allow(clippy::ref_option)]
-fn serialize_option_os_error<S>(error: &Option<io::Error>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    if let Some(error) = error {
-        serialize_os_error(error, serializer)
-    } else {
-        serializer.serialize_none()
-    }
-}
-
-fn deserialize_option_os_error<'de, D>(deserializer: D) -> Result<Option<io::Error>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let s: Option<i32> = Option::deserialize(deserializer)?;
-    match s {
-        Some(s) => Ok(Some(io::Error::from_raw_os_error(s))),
-        None => Ok(None),
-    }
-}
-
-#[allow(clippy::ref_option)]
-fn format_option_error(err: &Option<io::Error>) -> String {
-    match err {
-        Some(e) => e.to_string(),
-        None => "None".to_string(),
-    }
 }
