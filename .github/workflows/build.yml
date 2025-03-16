@@ -13,8 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # selecting a toolchain either by action or manual `rustup` calls should happen
-      # before the cache plugin, as the cache uses the current rustc version as its cache key
+      # selecting a toolchain either by action or manual `rustup` calls should
+      # happen before the cache plugin, as the cache uses the current rustc
+      # version as its cache key
       - name: Install Rust Toolchain
         run: |
           rustup toolchain install stable --profile minimal
@@ -25,17 +26,33 @@ jobs:
           workspaces: |
             . -> target
 
+      # Manages cargo installs with proper caching support
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@v2
+        with:
+          # An arbitrary version SemVer constrained to prevent breaking CI as
+          # time goes on. Feel free to bump.
+          tool: cargo-hack@0.6
+
+      - name: Remove Cargo.lock
+        # Because this is a library crate, it is best to not use a lockfile so
+        # we are more quickly alerted to breaking changes if a dependency
+        # violates semver.
+        run: rm Cargo.lock
+
+      # Fail fast
+      - name: Check
+        run: cargo hack check --feature-powerset --no-dev-deps
+
+      # Catch link-time errors missed by check
       - name: Build
-        run: |
-          # Because this is a library crate, it is best to not use a lockfile
-          # so we are more quickly alerted to breaking changes if a dependency
-          # violates semver.
-          rm Cargo.lock
-          cargo build
+        run: cargo build --all-features
 
-      # TODO: Test all permutations of crate features with cargo-hack
+      # Proper exhaustive testing
       - name: Test
-        run: cargo test
+        # Test can't be run with --no-dev-deps
+        run: cargo hack test --feature-powerset
 
+      # Finally, lets not be sloppy
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo hack clippy --feature-powerset --no-dev-deps
