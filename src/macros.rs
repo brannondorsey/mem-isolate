@@ -5,7 +5,7 @@
 //!
 //! ```
 //! #[cfg(feature = "tracing")]
-//! tracing::debug!("message", args);
+//! tracing::debug!("message");
 //! ```
 //!
 //! Into a `debug!` macro call.
