@@ -18,7 +18,7 @@ pub struct PipeFds {
 }
 
 // Define the core trait for system functions
-pub trait SystemFunctions {
+pub trait SystemFunctions: std::fmt::Debug {
     fn fork(&self) -> Result<ForkReturn, io::Error>;
     fn pipe(&self) -> Result<PipeFds, io::Error>;
     fn close(&self, fd: c_int) -> Result<(), io::Error>;

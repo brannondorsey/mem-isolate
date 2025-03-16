@@ -1,7 +1,6 @@
 //! # `mem-isolate`: *Run unsafe code safely*
 //!
-//! It runs your function via a `fork()`, waits for the result, and
-//! returns it.
+//! It runs your function via a `fork()`, waits for the result, and returns it.
 //!
 //! This grants your code access to an exact copy of memory and state at the
 //! time just before the call, but guarantees that the function will not affect
@@ -32,12 +31,28 @@
 //!
 //! For more information, see the [README](https://github.com/brannondorsey/mem-isolate).
 //!
-//! ## Supported platforms
+//! ## Supported Platforms
 //!
 //! Because of its heavy use of POSIX system calls, this crate only
 //! supports Unix-like operating systems (e.g. Linux, macOS, BSD).
 //!
 //! Windows and wasm support are not planned at this time.
+//!
+//!
+//! ## Feature Flags
+//!
+//! The following crate [feature
+//! flags](https://doc.rust-lang.org/cargo/reference/manifest.html#the-features-section)
+//! are available:
+//!
+//! * `tracing`: Enable [tracing](https://docs.rs/tracing) instrumentation.
+//!   Instruments all high-level functions in [`lib.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/src/lib.rs) and creates spans for
+//!   child and parent processes in [`execute_in_isolated_process`]. Events are
+//!   mostly `debug!` and `error!` level. See [`examples/tracing.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/examples/tracing.rs)
+//!   for an example.
+//!
+//! By default, no additional features are enabled.
+//!
 #![warn(missing_docs)]
 #![warn(clippy::pedantic, clippy::unwrap_used)]
 #![warn(missing_debug_implementations)]
@@ -47,7 +62,15 @@ compile_error!(
     "Because of its heavy use of POSIX system calls, this crate only supports Unix-like operating systems (e.g. Linux, macOS, BSD)"
 );
 
+mod macros;
+use macros::{debug, error};
+#[cfg(feature = "tracing")]
+// Don't import event macros like debug, error, etc. directly to avoid conflicts
+// with our macros (see just above^)
+use tracing::{Level, instrument, span};
+
 use libc::c_int;
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::io::FromRawFd;
@@ -81,6 +104,9 @@ pub use serde::{Serialize, de::DeserializeOwned};
 const CHILD_EXIT_HAPPY: i32 = 0;
 const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 3;
 const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
+
+#[cfg(feature = "tracing")]
+const HIGHEST_LEVEL: Level = Level::ERROR;
 
 /// Executes a user-supplied `callable` in a forked child process so that any
 /// memory changes during execution do not affect the parent. The child
@@ -166,12 +192,15 @@ const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
 /// This is the intended behavior as the function's purpose is to isolate all
 /// memory effects of the callable. However, this can be surprising, especially
 /// for [`FnMut`] or [`FnOnce`] closures.
-#[allow(clippy::too_many_lines)] // TODO: Break this up for readability
+#[cfg_attr(feature = "tracing", instrument(skip(callable)))]
 pub fn execute_in_isolated_process<F, T>(callable: F) -> Result<T, MemIsolateError>
 where
     F: FnOnce() -> T,
     T: Serialize + DeserializeOwned,
 {
+    #[cfg(feature = "tracing")]
+    let parent_span = span!(HIGHEST_LEVEL, "parent").entered();
+
     let sys = get_system_functions();
     let PipeFds { read_fd, write_fd } = create_pipe(&sys)?;
 
@@ -180,6 +209,11 @@ where
 
         // Child process
         Ok(ForkReturn::Child) => {
+            #[cfg(feature = "tracing")]
+            let _child_span = {
+                std::mem::drop(parent_span);
+                span!(HIGHEST_LEVEL, "child").entered()
+            };
             // NOTE: Fallible actions in the child must either serialize
             // and send their error over the pipe, or exit with a code
             // that can be inerpreted by the parent.
@@ -190,8 +224,7 @@ where
             let mut writer = unsafe { File::from_raw_fd(write_fd) };
             close_read_end_of_pipe_in_child_or_exit(&sys, &mut writer, read_fd);
 
-            // Execute the callable and handle serialization
-            let result = callable();
+            let result = execute_callable(callable);
             let encoded = serialize_result_or_error_value(result);
             write_and_flush_or_exit(&sys, &mut writer, &encoded);
             exit_happy(&sys)
@@ -211,6 +244,7 @@ where
 }
 
 #[must_use]
+#[cfg_attr(feature = "tracing", instrument)]
 fn get_system_functions() -> impl SystemFunctions {
     // Use the appropriate implementation based on build config
     #[cfg(not(test))]
@@ -224,37 +258,66 @@ fn get_system_functions() -> impl SystemFunctions {
         // Create a new fallback mock if no mock is active
         c::mock::MockableSystemFunctions::with_fallback()
     };
+
+    debug!("using {:?}", sys);
     sys
 }
 
+#[cfg_attr(feature = "tracing", instrument)]
 fn create_pipe<S: SystemFunctions>(sys: &S) -> Result<PipeFds, MemIsolateError> {
     let pipe_fds = match sys.pipe() {
         Ok(pipe_fds) => pipe_fds,
         Err(err) => {
-            return Err(CallableDidNotExecute(PipeCreationFailed(err)));
+            let err = CallableDidNotExecute(PipeCreationFailed(err));
+            error!("error creating pipe, propagating {:?}", err);
+            return Err(err);
         }
     };
-
+    debug!("pipe created: {:?}", pipe_fds);
     Ok(pipe_fds)
 }
 
+#[cfg_attr(feature = "tracing", instrument(skip(callable)))]
+fn execute_callable<F, T>(callable: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    debug!("starting execution of user-supplied callable");
+    #[allow(clippy::let_and_return)]
+    let result = {
+        #[cfg(feature = "tracing")]
+        let _span = span!(HIGHEST_LEVEL, "inside_callable").entered();
+        callable()
+    };
+    debug!("finished execution of user-supplied callable");
+    result
+}
+
+#[cfg_attr(feature = "tracing", instrument)]
 fn wait_for_child<S: SystemFunctions>(
     sys: &S,
     child_pid: c_int,
 ) -> Result<WaitpidStatus, MemIsolateError> {
-    // Wait for the child process to exit
     let waitpid_bespoke_status = match sys.waitpid(child_pid) {
         Ok(status) => status,
         Err(wait_err) => {
-            return Err(CallableStatusUnknown(WaitFailed(wait_err)));
+            let err = CallableStatusUnknown(WaitFailed(wait_err));
+            error!("error waiting for child process, propagating {:?}", err);
+            return Err(err);
         }
     };
 
+    debug!(
+        "wait completed, received status: {:?}",
+        waitpid_bespoke_status
+    );
     Ok(waitpid_bespoke_status)
 }
 
+#[cfg_attr(feature = "tracing", instrument)]
 fn error_if_child_unhappy(waitpid_bespoke_status: WaitpidStatus) -> Result<(), MemIsolateError> {
-    if let Some(exit_status) = child_process_exited_on_its_own(waitpid_bespoke_status) {
+    let result = if let Some(exit_status) = child_process_exited_on_its_own(waitpid_bespoke_status)
+    {
         match exit_status {
             CHILD_EXIT_HAPPY => Ok(()),
             CHILD_EXIT_IF_READ_CLOSE_FAILED => {
@@ -271,14 +334,33 @@ fn error_if_child_unhappy(waitpid_bespoke_status: WaitpidStatus) -> Result<(), M
         Err(CallableStatusUnknown(UnexpectedWaitpidReturnValue(
             waitpid_bespoke_status,
         )))
+    };
+
+    if let Ok(()) = result {
+        debug!("child process exited happily on its own");
+    } else {
+        error!("child process signaled an error, propagating {:?}", result);
     }
+
+    result
 }
 
+#[cfg_attr(feature = "tracing", instrument)]
 fn deserialize_result<T: DeserializeOwned>(buffer: &[u8]) -> Result<T, MemIsolateError> {
     match bincode::deserialize::<Result<T, MemIsolateError>>(buffer) {
-        Ok(Ok(result)) => Ok(result),
-        Ok(Err(err)) => Err(err),
-        Err(err) => Err(CallableExecuted(DeserializationFailed(err.to_string()))),
+        Ok(Ok(result)) => {
+            debug!("successfully deserialized happy result");
+            Ok(result)
+        }
+        Ok(Err(err)) => {
+            debug!("successfully deserialized error result: {:?}", err);
+            Err(err)
+        }
+        Err(err) => {
+            let err = CallableExecuted(DeserializationFailed(err.to_string()));
+            error!("failed to deserialize result, propagating {:?}", err);
+            Err(err)
+        }
     }
 }
 
@@ -287,77 +369,134 @@ fn deserialize_result<T: DeserializeOwned>(buffer: &[u8]) -> Result<T, MemIsolat
 /// # Panics
 ///
 /// Panics if the serialization of a [`MemIsolateError`] fails
+#[cfg_attr(feature = "tracing", instrument(skip(result)))]
 fn serialize_result_or_error_value<T: Serialize>(result: T) -> Vec<u8> {
     match bincode::serialize(&Ok::<T, MemIsolateError>(result)) {
-        Ok(encoded) => encoded,
+        Ok(encoded) => {
+            debug!(
+                "serialization successful, resulted in {} bytes",
+                encoded.len()
+            );
+            encoded
+        }
         Err(err) => {
             let err = CallableExecuted(SerializationFailed(err.to_string()));
-            bincode::serialize(&Err::<T, MemIsolateError>(err)).expect("failed to serialize error")
+            error!(
+                "serialization failed, now attempting to serialize error: {:?}",
+                err
+            );
+            #[allow(clippy::let_and_return)]
+            let encoded = bincode::serialize(&Err::<T, MemIsolateError>(err))
+                .expect("failed to serialize error");
+            debug!(
+                "serialization of error successful, resulting in {} bytes",
+                encoded.len()
+            );
+            encoded
         }
     }
 }
 
+#[cfg_attr(feature = "tracing", instrument)]
 fn write_and_flush_or_exit<S, W>(sys: &S, writer: &mut W, buffer: &[u8])
 where
     S: SystemFunctions,
-    W: Write,
+    W: Write + Debug,
 {
     let result = writer.write_all(buffer).and_then(|()| writer.flush());
-    if let Err(_err) = result {
+    #[allow(unused_variables)]
+    if let Err(err) = result {
+        error!("error writing to pipe: {:?}", err);
         // If we can't write to the pipe, we can't communicate the error either
-        // Parent will detect this as an UnexpectedChildDeath
+        // so we rely on the parent correctly interpreting the exit code
+        let exit_code = CHILD_EXIT_IF_WRITE_FAILED;
+        debug!("exiting child process with exit code: {}", exit_code);
         #[allow(clippy::used_underscore_items)]
-        sys._exit(CHILD_EXIT_IF_WRITE_FAILED);
+        sys._exit(exit_code);
+    } else {
+        debug!("wrote and flushed to pipe successfully");
     }
 }
 
 fn exit_happy<S: SystemFunctions>(sys: &S) -> ! {
+    // NOTE: We don't wrap this in #[cfg_attr(feature = "tracing", instrument)]
+    // because doing so results in a compiler error because of the `!` return type
+    // No idea why its usage is fine without the cfg_addr...
+    #[cfg(feature = "tracing")]
+    let _span = {
+        const FN_NAME: &str = stringify!(exit_happy);
+        span!(HIGHEST_LEVEL, FN_NAME).entered()
+    };
+
+    let exit_code = CHILD_EXIT_HAPPY;
+    debug!("exiting child process with exit code: {}", exit_code);
+
     #[allow(clippy::used_underscore_items)]
-    sys._exit(CHILD_EXIT_HAPPY);
+    sys._exit(exit_code);
 }
 
+#[cfg_attr(feature = "tracing", instrument)]
 fn read_all_of_child_result_pipe(read_fd: c_int) -> Result<Vec<u8>, MemIsolateError> {
     // Read from the pipe by wrapping the read fd as a File
     let mut buffer = Vec::new();
     {
         let mut reader = unsafe { File::from_raw_fd(read_fd) };
         if let Err(err) = reader.read_to_end(&mut buffer) {
-            return Err(CallableStatusUnknown(ParentPipeReadFailed(err)));
+            let err = CallableStatusUnknown(ParentPipeReadFailed(err));
+            error!("error reading from pipe, propagating {:?}", err);
+            return Err(err);
         }
     } // The read_fd will automatically be closed when the File is dropped
 
     if buffer.is_empty() {
         // TODO: How can we more rigorously know this? Maybe we write to a mem map before and after execution?
-        return Err(CallableStatusUnknown(CallableProcessDiedDuringExecution));
+        let err = CallableStatusUnknown(CallableProcessDiedDuringExecution);
+        error!("buffer unexpectedly empty, propagating {:?}", err);
+        return Err(err);
     }
 
+    debug!("successfully read {} bytes from pipe", buffer.len());
     Ok(buffer)
 }
 
+#[cfg_attr(feature = "tracing", instrument)]
 fn close_write_end_of_pipe_in_parent<S: SystemFunctions>(
     sys: &S,
     write_fd: c_int,
 ) -> Result<(), MemIsolateError> {
     if let Err(err) = sys.close(write_fd) {
-        return Err(CallableStatusUnknown(ParentPipeCloseFailed(err)));
+        let err = CallableStatusUnknown(ParentPipeCloseFailed(err));
+        error!("error closing write end of pipe, propagating {:?}", err);
+        return Err(err);
     }
-
+    debug!("write end of pipe closed successfully");
     Ok(())
 }
 
+#[cfg_attr(feature = "tracing", instrument)]
 fn close_read_end_of_pipe_in_child_or_exit<S: SystemFunctions>(
     sys: &S,
-    writer: &mut impl Write,
+    writer: &mut (impl Write + Debug),
     read_fd: c_int,
 ) {
     if let Err(close_err) = sys.close(read_fd) {
         let err = CallableDidNotExecute(ChildPipeCloseFailed(Some(close_err)));
+        error!(
+            "error closing read end of pipe, now attempting to serialize error: {:?}",
+            err
+        );
+
         let encoded = bincode::serialize(&err).expect("failed to serialize error");
         writer
             .write_all(&encoded)
             .expect("failed to write error to pipe");
         writer.flush().expect("failed to flush error to pipe");
+
+        let exit_code = CHILD_EXIT_IF_READ_CLOSE_FAILED;
+        error!("exiting child process with exit code: {}", exit_code);
         #[allow(clippy::used_underscore_items)]
-        sys._exit(CHILD_EXIT_IF_READ_CLOSE_FAILED);
+        sys._exit(exit_code);
+    } else {
+        debug!("read end of pipe closed successfully");
     }
 }

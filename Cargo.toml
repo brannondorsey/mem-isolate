@@ -9,20 +9,30 @@ readme = "README.md"
 repository = "https://github.com/brannondorsey/mem-isolate"
 keywords = ["memory", "isolation", "sandbox", "unix"]
 categories = ["memory-management", "os::unix-apis", "rust-patterns"]
-exclude = [
-    ".github/*",
-]
+exclude = [".github/*"]
+
+[features]
+# Include no features by default
+default = []
+
+# Include all features
+full = ["tracing"]
+
+# Actual features
+tracing = ["dep:tracing"]
 
 [dependencies]
 bincode = "1"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+tracing = { version = "0.1.41", optional = true }
 
 [dev-dependencies]
 criterion = "0.5.1"
 rand = "0.9.0"
 tempfile = "3.18.0"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 
 [[bench]]
 name = "benchmarks"
@@ -35,3 +45,7 @@ test = true
 [[example]]
 name = "error-handling-complete"
 test = true
+
+[[example]]
+name = "tracing"
+required-features = ["tracing"]
