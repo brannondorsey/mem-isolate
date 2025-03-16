@@ -1,7 +1,6 @@
 //! # `mem-isolate`: *Run unsafe code safely*
 //!
-//! It runs your function via a `fork()`, waits for the result, and
-//! returns it.
+//! It runs your function via a `fork()`, waits for the result, and returns it.
 //!
 //! This grants your code access to an exact copy of memory and state at the
 //! time just before the call, but guarantees that the function will not affect
@@ -32,12 +31,28 @@
 //!
 //! For more information, see the [README](https://github.com/brannondorsey/mem-isolate).
 //!
-//! ## Supported platforms
+//! ## Supported Platforms
 //!
 //! Because of its heavy use of POSIX system calls, this crate only
 //! supports Unix-like operating systems (e.g. Linux, macOS, BSD).
 //!
 //! Windows and wasm support are not planned at this time.
+//!
+//!
+//! ## Feature Flags
+//!
+//! The following crate [feature
+//! flags](https://doc.rust-lang.org/cargo/reference/manifest.html#the-features-section)
+//! are available:
+//!
+//! * `tracing`: Enable [tracing](https://docs.rs/tracing) instrumentation.
+//!   Instruments all high-level functions in [`lib.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/src/lib.rs) and creates spans for
+//!   child and parent processes in [`execute_in_isolated_process`]. Events are
+//!   mostly `debug!` and `error!` level. See [`examples/tracing.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/examples/tracing.rs)
+//!   for an example.
+//!
+//! By default, no additional features are enabled.
+//!
 #![warn(missing_docs)]
 #![warn(clippy::pedantic, clippy::unwrap_used)]
 #![warn(missing_debug_implementations)]
