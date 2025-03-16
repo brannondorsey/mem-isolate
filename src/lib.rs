@@ -5,8 +5,10 @@
 //!
 //! This grants your code access to an exact copy of memory and state at the
 //! time just before the call, but guarantees that the function will not affect
-//! the parent process's memory footprint in any way. It forces functions to be
-//! *pure*, even if they aren't.
+//! the parent process's memory footprint in any way.
+//!
+//! It forces functions to be *memory pure* (pure with respect to memory), even
+//! if they aren't.
 //!
 //! ```
 //! use mem_isolate::execute_in_isolated_process;
