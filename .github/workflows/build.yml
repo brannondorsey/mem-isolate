@@ -19,16 +19,16 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
 
-      - name: Install cargo-hack
-        # An arbitrary version SemVer constrained to prevent breaking CI as time
-        # goes on. Feel free to bump.
-        run: cargo install cargo-hack@^0.6.35
-
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             . -> target
+
+      - name: Install cargo-hack
+        # An arbitrary version SemVer constrained to prevent breaking CI as time
+        # goes on. Feel free to bump.
+        run: cargo install cargo-hack@^0.6.35
 
       - name: Remove Cargo.lock
         # Because this is a library crate, it is best to not use a lockfile
