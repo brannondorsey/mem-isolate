@@ -30,7 +30,7 @@ jobs:
         with:
           # An arbitrary version SemVer constrained to prevent breaking CI as time
           # goes on. Feel free to bump.
-          tool: cargo-hack@^0.6.35
+          tool: cargo-hack@0.6
 
       - name: Remove Cargo.lock
         # Because this is a library crate, it is best to not use a lockfile
