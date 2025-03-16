@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Cut a new release only when the release PR is merged ([#28](https://github.com/brannondorsey/mem-isolate/pull/28))
 - Clarify function purity definition in README and module description ([#26](https://github.com/brannondorsey/mem-isolate/pull/26))
-- Add a benchmark indicating how fast a fork() could be without a wait() afterwards ([#23](https://github.com/brannondorsey/mem-isolate/pull/23))
+- Add a benchmark indicating how fast a `fork()` could be without a `wait()` afterwards ([#23](https://github.com/brannondorsey/mem-isolate/pull/23))
+- Use `cargo-hack` in CI to test all feature combinations ([#25](https://github.com/brannondorsey/mem-isolate/pull/25))
 - Refactor for readability ([#19](https://github.com/brannondorsey/mem-isolate/pull/19))
 
 ## [0.1.1](https://github.com/brannondorsey/mem-isolate/compare/v0.1.0...v0.1.1) - 2025-03-14
