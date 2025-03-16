@@ -1,0 +1,4 @@
+[workspace]
+# Release only when release PR is merged
+# https://release-plz.dev/docs/config#the-release_always-field
+release_always = false
