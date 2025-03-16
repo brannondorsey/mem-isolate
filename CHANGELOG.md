@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/brannondorsey/mem-isolate/compare/v0.1.1...v0.1.2) - 2025-03-16
+
+### Other
+
+- Add a benchmark indicating how fast a fork() could be without a wait() afterwards ([#23](https://github.com/brannondorsey/mem-isolate/pull/23))
+- Refactor for readability ([#19](https://github.com/brannondorsey/mem-isolate/pull/19))
+
 ## [0.1.1](https://github.com/brannondorsey/mem-isolate/compare/v0.1.0...v0.1.1) - 2025-03-14
 
 ### Other
