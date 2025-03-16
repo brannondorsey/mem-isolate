@@ -9,11 +9,16 @@ readme = "README.md"
 repository = "https://github.com/brannondorsey/mem-isolate"
 keywords = ["memory", "isolation", "sandbox", "unix"]
 categories = ["memory-management", "os::unix-apis", "rust-patterns"]
-exclude = [
-    ".github/*",
-]
+exclude = [".github/*"]
 
 [features]
+# Include no features by default
+default = []
+
+# Include all features
+full = ["tracing"]
+
+# Actual features
 tracing = ["dep:tracing"]
 
 [dependencies]
