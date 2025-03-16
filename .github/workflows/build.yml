@@ -19,23 +19,36 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
 
+      - name: Install cargo-hack
+        # An arbitrary version SemVer constrained to prevent breaking CI as time
+        # goes on. Feel free to bump.
+        run: cargo install cargo-hack@^0.6.35
+
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             . -> target
 
+      - name: Remove Cargo.lock
+        # Because this is a library crate, it is best to not use a lockfile
+        # so we are more quickly alerted to breaking changes if a dependency
+        # violates semver.
+        run: rm Cargo.lock
+
+      # Fail fast
+      - name: Check
+        run: cargo hack check --feature-powerset --no-dev-deps
+
+      # Catch link-time errors missed by check
       - name: Build
-        run: |
-          # Because this is a library crate, it is best to not use a lockfile
-          # so we are more quickly alerted to breaking changes if a dependency
-          # violates semver.
-          rm Cargo.lock
-          cargo build
+        run: cargo build --all-features
 
-      # TODO: Test all permutations of crate features with cargo-hack
+      # Proper exhaustive testing
       - name: Test
-        run: cargo test
+        # Test can't be run with --no-dev-deps
+        run: cargo hack test --feature-powerset
 
+      # Finally, lets not be sloppy
       - name: Clippy
-        run: cargo clippy --all-targets
+        run: cargo hack clippy --feature-powerset --no-dev-deps
