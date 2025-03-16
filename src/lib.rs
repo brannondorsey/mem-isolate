@@ -62,9 +62,12 @@ compile_error!(
     "Because of its heavy use of POSIX system calls, this crate only supports Unix-like operating systems (e.g. Linux, macOS, BSD)"
 );
 
+mod macros;
+use macros::{debug, error};
 #[cfg(feature = "tracing")]
+// Don't import event macros like debug, error, etc. directly to avoid conflicts
+// with our macros (see just above^)
 use tracing::{Level, instrument, span};
-// Don't import debug, error, warn directly to avoid conflicts with our macros
 
 use libc::c_int;
 use std::fmt::Debug;
@@ -104,9 +107,6 @@ const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
 
 #[cfg(feature = "tracing")]
 const HIGHEST_LEVEL: Level = Level::ERROR;
-
-mod macros;
-use macros::{debug, error};
 
 /// Executes a user-supplied `callable` in a forked child process so that any
 /// memory changes during execution do not affect the parent. The child
@@ -192,7 +192,6 @@ use macros::{debug, error};
 /// This is the intended behavior as the function's purpose is to isolate all
 /// memory effects of the callable. However, this can be surprising, especially
 /// for [`FnMut`] or [`FnOnce`] closures.
-#[allow(clippy::too_many_lines)] // TODO: Break this up for readability
 #[cfg_attr(feature = "tracing", instrument(skip(callable)))]
 pub fn execute_in_isolated_process<F, T>(callable: F) -> Result<T, MemIsolateError>
 where
@@ -211,9 +210,10 @@ where
         // Child process
         Ok(ForkReturn::Child) => {
             #[cfg(feature = "tracing")]
-            std::mem::drop(parent_span);
-            #[cfg(feature = "tracing")]
-            let _child_span = span!(HIGHEST_LEVEL, "child").entered();
+            let _child_span = {
+                std::mem::drop(parent_span);
+                span!(HIGHEST_LEVEL, "child").entered()
+            };
             // NOTE: Fallible actions in the child must either serialize
             // and send their error over the pipe, or exit with a code
             // that can be inerpreted by the parent.
@@ -259,7 +259,6 @@ fn get_system_functions() -> impl SystemFunctions {
         c::mock::MockableSystemFunctions::with_fallback()
     };
 
-    // Use the macro directly
     debug!("using {:?}", sys);
     sys
 }
@@ -274,7 +273,6 @@ fn create_pipe<S: SystemFunctions>(sys: &S) -> Result<PipeFds, MemIsolateError> 
             return Err(err);
         }
     };
-
     debug!("pipe created: {:?}", pipe_fds);
     Ok(pipe_fds)
 }
@@ -285,15 +283,13 @@ where
     F: FnOnce() -> T,
 {
     debug!("starting execution of user-supplied callable");
-
+    #[allow(clippy::let_and_return)]
     let result = {
         #[cfg(feature = "tracing")]
         let _span = span!(HIGHEST_LEVEL, "inside_callable").entered();
         callable()
     };
-
     debug!("finished execution of user-supplied callable");
-
     result
 }
 
@@ -302,7 +298,6 @@ fn wait_for_child<S: SystemFunctions>(
     sys: &S,
     child_pid: c_int,
 ) -> Result<WaitpidStatus, MemIsolateError> {
-    // Wait for the child process to exit
     let waitpid_bespoke_status = match sys.waitpid(child_pid) {
         Ok(status) => status,
         Err(wait_err) => {
@@ -390,10 +385,9 @@ fn serialize_result_or_error_value<T: Serialize>(result: T) -> Vec<u8> {
                 "serialization failed, now attempting to serialize error: {:?}",
                 err
             );
-
+            #[allow(clippy::let_and_return)]
             let encoded = bincode::serialize(&Err::<T, MemIsolateError>(err))
                 .expect("failed to serialize error");
-
             debug!(
                 "serialization of error successful, resulting in {} bytes",
                 encoded.len()
@@ -429,12 +423,12 @@ fn exit_happy<S: SystemFunctions>(sys: &S) -> ! {
     // because doing so results in a compiler error because of the `!` return type
     // No idea why its usage is fine without the cfg_addr...
     #[cfg(feature = "tracing")]
-    const FN_NAME: &str = stringify!(exit_happy);
-    #[cfg(feature = "tracing")]
-    let _span = span!(HIGHEST_LEVEL, FN_NAME).entered();
+    let _span = {
+        const FN_NAME: &str = stringify!(exit_happy);
+        span!(HIGHEST_LEVEL, FN_NAME).entered()
+    };
 
     let exit_code = CHILD_EXIT_HAPPY;
-
     debug!("exiting child process with exit code: {}", exit_code);
 
     #[allow(clippy::used_underscore_items)]
