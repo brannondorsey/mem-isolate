@@ -16,16 +16,18 @@ exclude = [".github/*"]
 default = []
 
 # Include all features
-full = ["tracing"]
+full = ["tracing", "async"]
 
 # Actual features
 tracing = ["dep:tracing"]
+async = ["dep:tokio"]
 
 [dependencies]
 bincode = "1"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+tokio = { version = "1.44.1", features = ["rt"], optional = true }
 tracing = { version = "0.1.41", optional = true }
 
 [dev-dependencies]
