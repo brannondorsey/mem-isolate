@@ -275,7 +275,6 @@ fn create_pipe<S: SystemFunctions>(sys: &S) -> Result<PipeFds, MemIsolateError> 
 #[cfg_attr(feature = "tracing", instrument)]
 fn fork<S: SystemFunctions>(sys: &S) -> Result<ForkReturn, MemIsolateError> {
     match sys.fork() {
-        // We chose not to
         Ok(result) => Ok(result),
         Err(err) => {
             let err = CallableDidNotExecute(ForkFailed(err));
