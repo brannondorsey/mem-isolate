@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3](https://github.com/brannondorsey/mem-isolate/compare/v0.1.2...v0.1.3) - 2025-03-18
+
+### Other
+
+- Refactor `fork()` into a subroutine ([#29](https://github.com/brannondorsey/mem-isolate/pull/29))
+
 ## [0.1.2](https://github.com/brannondorsey/mem-isolate/compare/v0.1.1...v0.1.2) - 2025-03-16
 
 ### Added
