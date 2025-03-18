@@ -69,6 +69,9 @@ use macros::{debug, error};
 // with our macros (see just above^)
 use tracing::{Level, instrument, span};
 
+#[cfg(feature = "async")]
+mod async_feature;
+
 use libc::c_int;
 use std::fmt::Debug;
 use std::fs::File;
@@ -240,7 +243,7 @@ where
 
 #[must_use]
 #[cfg_attr(feature = "tracing", instrument)]
-fn get_system_functions() -> impl SystemFunctions {
+pub(crate) fn get_system_functions() -> impl SystemFunctions {
     // Use the appropriate implementation based on build config
     #[cfg(not(test))]
     let sys = c::RealSystemFunctions;
@@ -323,7 +326,9 @@ fn wait_for_child<S: SystemFunctions>(
 }
 
 #[cfg_attr(feature = "tracing", instrument)]
-fn error_if_child_unhappy(waitpid_bespoke_status: WaitpidStatus) -> Result<(), MemIsolateError> {
+pub(crate) fn error_if_child_unhappy(
+    waitpid_bespoke_status: WaitpidStatus,
+) -> Result<(), MemIsolateError> {
     let result = if let Some(exit_status) = child_process_exited_on_its_own(waitpid_bespoke_status)
     {
         match exit_status {
@@ -354,7 +359,7 @@ fn error_if_child_unhappy(waitpid_bespoke_status: WaitpidStatus) -> Result<(), M
 }
 
 #[cfg_attr(feature = "tracing", instrument)]
-fn deserialize_result<T: DeserializeOwned>(buffer: &[u8]) -> Result<T, MemIsolateError> {
+pub(crate) fn deserialize_result<T: DeserializeOwned>(buffer: &[u8]) -> Result<T, MemIsolateError> {
     match bincode::deserialize::<Result<T, MemIsolateError>>(buffer) {
         Ok(Ok(result)) => {
             debug!("successfully deserialized happy result");
