@@ -280,7 +280,7 @@ fn fork<S: SystemFunctions>(sys: &S) -> Result<ForkReturn, MemIsolateError> {
         Err(err) => {
             let err = CallableDidNotExecute(ForkFailed(err));
             error!("error forking, propagating {:?}", err);
-            return Err(err);
+            Err(err)
         }
     }
 }
