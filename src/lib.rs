@@ -204,11 +204,8 @@ where
     let sys = get_system_functions();
     let PipeFds { read_fd, write_fd } = create_pipe(&sys)?;
 
-    match sys.fork() {
-        Err(err) => Err(CallableDidNotExecute(ForkFailed(err))),
-
-        // Child process
-        Ok(ForkReturn::Child) => {
+    match fork(&sys)? {
+        ForkReturn::Child => {
             #[cfg(feature = "tracing")]
             let _child_span = {
                 std::mem::drop(parent_span);
@@ -229,9 +226,7 @@ where
             write_and_flush_or_exit(&sys, &mut writer, &encoded);
             exit_happy(&sys)
         }
-
-        // Parent process
-        Ok(ForkReturn::Parent(child_pid)) => {
+        ForkReturn::Parent(child_pid) => {
             close_write_end_of_pipe_in_parent(&sys, write_fd)?;
 
             let waitpid_bespoke_status = wait_for_child(&sys, child_pid)?;
@@ -275,6 +270,18 @@ fn create_pipe<S: SystemFunctions>(sys: &S) -> Result<PipeFds, MemIsolateError> 
     };
     debug!("pipe created: {:?}", pipe_fds);
     Ok(pipe_fds)
+}
+
+#[cfg_attr(feature = "tracing", instrument)]
+fn fork<S: SystemFunctions>(sys: &S) -> Result<ForkReturn, MemIsolateError> {
+    match sys.fork() {
+        Ok(result) => Ok(result),
+        Err(err) => {
+            let err = CallableDidNotExecute(ForkFailed(err));
+            error!("error forking, propagating {:?}", err);
+            Err(err)
+        }
+    }
 }
 
 #[cfg_attr(feature = "tracing", instrument(skip(callable)))]
