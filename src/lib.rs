@@ -104,12 +104,12 @@ use MemIsolateError::{CallableDidNotExecute, CallableExecuted, CallableStatusUnk
 pub use serde::{Serialize, de::DeserializeOwned};
 
 // Child process exit status codes
-const CHILD_EXIT_HAPPY: i32 = 0;
-const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 3;
+pub(crate) const CHILD_EXIT_HAPPY: i32 = 0;
+pub(crate) const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 3;
 const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
 
 #[cfg(feature = "tracing")]
-const HIGHEST_LEVEL: Level = Level::ERROR;
+pub(crate) const HIGHEST_LEVEL: Level = Level::ERROR;
 
 /// Executes a user-supplied `callable` in a forked child process so that any
 /// memory changes during execution do not affect the parent. The child
@@ -291,6 +291,7 @@ fn fork<S: SystemFunctions>(sys: &S) -> Result<ForkReturn, MemIsolateError> {
 fn execute_callable<F, T>(callable: F) -> T
 where
     F: FnOnce() -> T,
+    T: Serialize + DeserializeOwned,
 {
     debug!("starting execution of user-supplied callable");
     #[allow(clippy::let_and_return)]
@@ -357,6 +358,7 @@ pub(crate) fn error_if_child_unhappy(
     result
 }
 
+// TODO: Can we serde async?
 #[cfg_attr(feature = "tracing", instrument)]
 pub(crate) fn deserialize_result<T: DeserializeOwned>(buffer: &[u8]) -> Result<T, MemIsolateError> {
     match bincode::deserialize::<Result<T, MemIsolateError>>(buffer) {

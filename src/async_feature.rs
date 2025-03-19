@@ -10,9 +10,11 @@ use libc::c_int;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{Read, Write};
+use std::marker::Unpin;
 use std::os::unix::io::FromRawFd;
 use std::sync::Arc;
-use tokio::io::{self, AsyncReadExt};
+use tokio::io::{self, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::sync::Mutex;
 use tokio::task;
 
 use crate::c::{
@@ -20,6 +22,8 @@ use crate::c::{
     child_process_killed_by_signal,
 };
 
+#[cfg(feature = "tracing")]
+use crate::HIGHEST_LEVEL;
 pub use crate::errors::MemIsolateError;
 use crate::errors::{
     CallableDidNotExecuteError::{ChildPipeCloseFailed, ForkFailed, PipeCreationFailed},
@@ -29,7 +33,11 @@ use crate::errors::{
         ParentPipeReadFailed, UnexpectedChildExitStatus, UnexpectedWaitpidReturnValue, WaitFailed,
     },
 };
-use crate::{deserialize_result, error_if_child_unhappy, get_system_functions};
+use crate::{
+    CHILD_EXIT_HAPPY, CHILD_EXIT_IF_READ_CLOSE_FAILED, CHILD_EXIT_IF_WRITE_FAILED,
+    deserialize_result, error_if_child_unhappy, get_system_functions,
+    serialize_result_or_error_value,
+};
 
 use MemIsolateError::{CallableDidNotExecute, CallableExecuted, CallableStatusUnknown};
 
@@ -52,8 +60,15 @@ where
     let fork_result = fork(sys.clone()).await?;
     match fork_result {
         ForkReturn::Child => {
-            // TODO: Pick up here and continue implementing the child process
-            todo!()
+            let writer = unsafe { File::from_raw_fd(write_fd) };
+            let writer = tokio::fs::File::from_std(writer);
+            let writer = Arc::new(Mutex::new(writer));
+            close_read_end_of_pipe_in_child_or_exit(sys.clone(), writer.clone(), read_fd).await;
+
+            let result = execute_callable(callable).await;
+            let encoded = serialize_result_or_error_value(result);
+            write_and_flush_or_exit(sys.clone(), writer.clone(), &encoded).await;
+            exit_happy(sys.clone())
         }
         ForkReturn::Parent(child_pid) => {
             close_write_end_of_pipe_in_parent(sys.clone(), write_fd).await?;
@@ -91,6 +106,25 @@ async fn fork<S: SystemFunctions>(sys: Arc<S>) -> Result<ForkReturn, MemIsolateE
     fork_result.map_err(|err| CallableDidNotExecute(ForkFailed(err)))
 }
 
+#[cfg_attr(feature = "tracing", instrument(skip(callable)))]
+async fn execute_callable<F, Fut, T>(callable: F) -> T
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = T> + Send + 'static,
+    T: Serialize + DeserializeOwned + Send + 'static,
+{
+    debug!("starting execution of user-supplied callable");
+    #[allow(clippy::let_and_return)]
+    let result = {
+        // #[cfg(feature = "tracing")]
+        // TODO: This
+        // let _span = span!(HIGHEST_LEVEL, "inside_callable").entered();
+        callable().await
+    };
+    debug!("finished execution of user-supplied callable");
+    result
+}
+
 #[cfg_attr(feature = "tracing", instrument)]
 async fn wait_for_child<S: SystemFunctions>(
     sys: Arc<S>,
@@ -114,6 +148,50 @@ async fn wait_for_child<S: SystemFunctions>(
         waitpid_bespoke_status
     );
     Ok(waitpid_bespoke_status)
+}
+
+#[cfg_attr(feature = "tracing", instrument)]
+async fn write_and_flush_or_exit<S: SystemFunctions>(
+    sys: Arc<S>,
+    writer: Arc<Mutex<impl AsyncWrite + Debug + Unpin>>,
+    buffer: &[u8],
+) {
+    let mut writer_guard = writer.lock().await;
+    let write_result = writer_guard.write_all(buffer).await;
+    let result = match write_result {
+        Ok(()) => writer_guard.flush().await,
+        Err(e) => Err(e),
+    };
+
+    #[allow(unused_variables)]
+    if let Err(err) = result {
+        error!("error writing to pipe: {:?}", err);
+        // If we can't write to the pipe, we can't communicate the error either
+        // so we rely on the parent correctly interpreting the exit code
+        let exit_code = CHILD_EXIT_IF_WRITE_FAILED;
+        debug!("exiting child process with exit code: {}", exit_code);
+        #[allow(clippy::used_underscore_items)]
+        sys._exit(exit_code);
+    } else {
+        debug!("wrote and flushed to pipe successfully");
+    }
+}
+
+fn exit_happy<S: SystemFunctions>(sys: Arc<S>) -> ! {
+    // NOTE: We don't wrap this in #[cfg_attr(feature = "tracing", instrument)]
+    // because doing so results in a compiler error because of the `!` return type
+    // No idea why its usage is fine without the cfg_addr...
+    #[cfg(feature = "tracing")]
+    let _span = {
+        const FN_NAME: &str = stringify!(exit_happy);
+        span!(HIGHEST_LEVEL, FN_NAME).entered()
+    };
+
+    let exit_code = CHILD_EXIT_HAPPY;
+    debug!("exiting child process with exit code: {}", exit_code);
+
+    #[allow(clippy::used_underscore_items)]
+    sys._exit(exit_code);
 }
 
 #[cfg_attr(feature = "tracing", instrument)]
@@ -159,4 +237,50 @@ async fn close_write_end_of_pipe_in_parent<S: SystemFunctions>(
     }
     debug!("write end of pipe closed successfully");
     Ok(())
+}
+
+#[cfg_attr(feature = "tracing", instrument)]
+async fn close_read_end_of_pipe_in_child_or_exit<S: SystemFunctions>(
+    sys: Arc<S>,
+    writer: Arc<Mutex<impl AsyncWrite + Debug + Unpin>>,
+    read_fd: c_int,
+) {
+    let sys_clone = sys.clone();
+    let handle_error = async move |err: MemIsolateError| {
+        error!(
+            "error closing read end of pipe, now attempting to serialize error: {:?}",
+            err
+        );
+
+        let encoded = bincode::serialize(&err).expect("failed to serialize error");
+        // TODO: Any drops needed here?
+        let mut writer_guard = writer.lock().await;
+        writer_guard
+            .write_all(&encoded)
+            .await
+            .expect("failed to write error to pipe");
+        writer_guard
+            .flush()
+            .await
+            .expect("failed to flush error to pipe");
+
+        let exit_code = CHILD_EXIT_IF_READ_CLOSE_FAILED;
+        error!("exiting child process with exit code: {}", exit_code);
+        #[allow(clippy::used_underscore_items)]
+        sys_clone._exit(exit_code);
+    };
+
+    match task::spawn_blocking(move || sys.close(read_fd)).await {
+        Ok(Ok(())) => {
+            debug!("read end of pipe closed successfully");
+        }
+        Ok(Err(err)) => {
+            let err = CallableDidNotExecute(ChildPipeCloseFailed(Some(err)));
+            handle_error(err).await;
+        }
+        Err(join_err) => {
+            let err = CallableDidNotExecute(ChildPipeCloseFailed(Some(join_err.into())));
+            handle_error(err).await;
+        }
+    }
 }
