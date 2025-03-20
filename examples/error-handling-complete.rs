@@ -13,12 +13,12 @@ fn main() {
     match result {
         Ok(_) => {}
 
-        Err(CallableExecuted(SerializationFailed(_string))) => {}
+        Err(CallableExecuted(SerializationFailed)) => {}
         Err(CallableExecuted(DeserializationFailed(_string))) => {}
-        Err(CallableExecuted(ChildPipeWriteFailed(_opt_err))) => {}
+        Err(CallableExecuted(ChildPipeWriteFailed)) => {}
 
         Err(CallableDidNotExecute(PipeCreationFailed(_err))) => {}
-        Err(CallableDidNotExecute(ChildPipeCloseFailed(_opt_err))) => {}
+        Err(CallableDidNotExecute(ChildPipeCloseFailed)) => {}
         Err(CallableDidNotExecute(ForkFailed(_err))) => {}
 
         Err(CallableStatusUnknown(ParentPipeCloseFailed(_err))) => {}
