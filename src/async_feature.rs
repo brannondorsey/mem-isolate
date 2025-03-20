@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 
-use crate::macros::{debug, error};
+use crate::macros::{debug, error, info};
 #[cfg(feature = "tracing")]
 // Don't import event macros like debug, error, etc. directly to avoid conflicts
 // with our macros (see just above^)
@@ -35,7 +35,7 @@ use crate::errors::{
 };
 use crate::{
     CHILD_EXIT_HAPPY, CHILD_EXIT_IF_READ_CLOSE_FAILED, CHILD_EXIT_IF_WRITE_FAILED,
-    deserialize_result, error_if_child_unhappy, get_system_functions,
+    deserialize_result, error_if_child_unhappy, fork, get_system_functions,
     serialize_result_or_error_value,
 };
 
@@ -57,17 +57,26 @@ where
     let sys = Arc::new(get_system_functions());
     let PipeFds { read_fd, write_fd } = create_pipe(sys.clone()).await?;
 
-    let fork_result = fork(sys.clone()).await?;
-    match fork_result {
+    // NOTE: This fork must be blocking
+    match fork(&*sys)? {
         ForkReturn::Child => {
-            let writer = unsafe { File::from_raw_fd(write_fd) };
-            let writer = tokio::fs::File::from_std(writer);
-            let writer = Arc::new(Mutex::new(writer));
-            close_read_end_of_pipe_in_child_or_exit(sys.clone(), writer.clone(), read_fd).await;
-
-            let result = execute_callable(callable).await;
-            let encoded = serialize_result_or_error_value(result);
-            write_and_flush_or_exit(sys.clone(), writer.clone(), &encoded).await;
+            std::thread::spawn(move || {
+                let rt =
+                    tokio::runtime::Runtime::new().expect("failed to create new Tokio runtime");
+                rt.block_on(async {
+                    let writer = unsafe { File::from_raw_fd(write_fd) };
+                    let writer = tokio::fs::File::from_std(writer);
+                    let writer = Arc::new(Mutex::new(writer));
+                    close_read_end_of_pipe_in_child_or_exit(sys.clone(), writer.clone(), read_fd)
+                        .await;
+                    let result = execute_callable(callable).await;
+                    let encoded = serialize_result_or_error_value(result);
+                    write_and_flush_or_exit(sys.clone(), writer.clone(), &encoded).await;
+                    exit_happy(sys.clone())
+                })
+            })
+            .join()
+            .expect("failed to join on thread");
             exit_happy(sys.clone())
         }
         ForkReturn::Parent(child_pid) => {
@@ -96,14 +105,6 @@ async fn create_pipe<S: SystemFunctions>(sys: Arc<S>) -> Result<PipeFds, MemIsol
     };
     debug!("pipe created: {:?}", pipe_fds);
     Ok(pipe_fds)
-}
-
-#[cfg_attr(feature = "tracing", instrument)]
-async fn fork<S: SystemFunctions>(sys: Arc<S>) -> Result<ForkReturn, MemIsolateError> {
-    let fork_result = task::spawn_blocking(move || sys.fork())
-        .await
-        .map_err(|join_err| CallableDidNotExecute(ForkFailed(join_err.into())))?;
-    fork_result.map_err(|err| CallableDidNotExecute(ForkFailed(err)))
 }
 
 #[cfg_attr(feature = "tracing", instrument(skip(callable)))]

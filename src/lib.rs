@@ -111,6 +111,7 @@ const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
 #[cfg(feature = "tracing")]
 pub(crate) const HIGHEST_LEVEL: Level = Level::ERROR;
 
+#[cfg(feature = "async")]
 pub use async_feature::execute_in_isolated_process as execute_in_isolated_process_async;
 
 /// Executes a user-supplied `callable` in a forked child process so that any
