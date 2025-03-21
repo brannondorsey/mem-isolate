@@ -249,15 +249,23 @@ where
 pub(crate) fn get_system_functions() -> impl SystemFunctions {
     // Use the appropriate implementation based on build config
     #[cfg(not(test))]
-    let sys = c::RealSystemFunctions;
+    let sys = c::SystemFunctionsImpl::Real(c::RealSystemFunctions);
 
     #[cfg(test)]
-    let sys = if c::mock::is_mocking_enabled() {
-        // Use the mock from thread-local storage
-        c::mock::get_current_mock()
-    } else {
-        // Create a new fallback mock if no mock is active
-        c::mock::MockableSystemFunctions::with_fallback()
+    let sys = {
+        // Check environment variable to control mock behavior
+        // If MOCK_SYSTEM_FUNCTIONS=0, use real implementation even in tests
+        match std::env::var("MOCK_SYSTEM_FUNCTIONS") {
+            Ok(val) if val == "0" => {
+                debug!("Using real system functions based on environment variable");
+                c::SystemFunctionsImpl::Real(c::RealSystemFunctions)
+            }
+            _ => {
+                // Default to mock with fallback in tests
+                debug!("Using mock system functions with fallback");
+                c::SystemFunctionsImpl::Mock(c::mock::MockableSystemFunctions::with_fallback())
+            }
+        }
     };
 
     debug!("using {:?}", sys);

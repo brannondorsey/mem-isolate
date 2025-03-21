@@ -2,8 +2,7 @@
 
 use super::*;
 use crate::c::mock::{
-    CallBehavior, MockConfig, configured_strict, configured_with_fallback, is_mocking_enabled,
-    with_mock_system,
+    CallBehavior, MockConfig, configured_strict, configured_with_fallback, with_mock_system,
 };
 use errors::CallableDidNotExecuteError;
 use errors::CallableExecutedError;
@@ -288,18 +287,15 @@ fn deserialization_error() {
 
 #[test]
 fn with_mock_helper() {
-    with_mock_system(MockConfig::Fallback, |_| {
+    with_mock_system(MockConfig::Fallback, |mock| {
         // Test with active mocking
         // Check that mocking is properly configured
-        assert!(is_mocking_enabled());
+        assert!(mock.is_fallback_enabled());
 
         // Test code that uses mocked functions
         let result = execute_in_isolated_process(|| MyResult { value: 42 }).unwrap();
         assert_eq!(result, MyResult { value: 42 });
     });
-
-    // After with_mock_system, mocking is disabled automatically
-    assert!(!is_mocking_enabled());
 }
 
 #[test]
