@@ -1,9 +1,11 @@
 use crate::c::{ForkReturn, PipeFds, RealSystemFunctions, SystemFunctions};
 use libc::c_int;
-use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::io;
-use std::thread_local;
+use std::sync::{
+    RwLock,
+    atomic::{AtomicBool, Ordering},
+};
 
 // Type for representing a mock result
 #[derive(Clone, Debug)]
@@ -49,23 +51,23 @@ pub enum CallBehavior<T> {
     Mock(Result<T, io::Error>), // Use a mock result
 }
 
-/// A generic queue of call implementations
-#[derive(Clone, Debug)]
+/// A generic queue of call implementations, now thread-safe
+#[derive(Debug)]
 struct CallQueue<T> {
-    queue: RefCell<VecDeque<CallImplementation<T>>>,
+    queue: RwLock<VecDeque<CallImplementation<T>>>,
     name: &'static str, // For better error messages
 }
 
 impl<T: Clone> CallQueue<T> {
     fn new(name: &'static str) -> Self {
         Self {
-            queue: RefCell::new(VecDeque::new()),
+            queue: RwLock::new(VecDeque::new()),
             name,
         }
     }
 
     fn push(&self, behavior: CallBehavior<T>) {
-        let mut queue = self.queue.borrow_mut();
+        let mut queue = self.queue.write().expect("Failed to acquire write lock");
         match behavior {
             CallBehavior::Real => queue.push_back(CallImplementation::Real),
             CallBehavior::Mock(result) => {
@@ -78,8 +80,8 @@ impl<T: Clone> CallQueue<T> {
     where
         F: FnOnce() -> Result<T, io::Error>,
     {
-        // Get explicit reference to make the borrow checker happy
-        let mut queue = self.queue.borrow_mut();
+        // Get writable reference to make changes
+        let mut queue = self.queue.write().expect("Failed to acquire write lock");
         match queue.pop_front() {
             Some(CallImplementation::Real) => real_impl(),
             Some(CallImplementation::Mock(result)) => result.to_result(),
@@ -93,21 +95,37 @@ impl<T: Clone> CallQueue<T> {
 }
 
 /// Mock implementation that returns predefined values and can fall back to real implementation
-#[derive(Clone, Debug)]
+/// Now implements Send + Sync for thread safety
+#[derive(Debug)]
 pub struct MockableSystemFunctions {
     real_impl: RealSystemFunctions,
-    fallback_enabled: Cell<bool>,
+    fallback_enabled: AtomicBool,
     fork_queue: CallQueue<ForkReturn>,
     pipe_queue: CallQueue<PipeFds>,
     close_queue: CallQueue<()>,
     waitpid_queue: CallQueue<c_int>,
 }
 
+impl Clone for MockableSystemFunctions {
+    fn clone(&self) -> Self {
+        // Create a fresh instance rather than trying to clone the locks
+        // This is cleaner than trying to deep-clone the RwLocks
+        Self {
+            real_impl: self.real_impl.clone(),
+            fallback_enabled: AtomicBool::new(self.fallback_enabled.load(Ordering::Relaxed)),
+            fork_queue: CallQueue::new("fork"),
+            pipe_queue: CallQueue::new("pipe"),
+            close_queue: CallQueue::new("close"),
+            waitpid_queue: CallQueue::new("waitpid"),
+        }
+    }
+}
+
 impl Default for MockableSystemFunctions {
     fn default() -> Self {
         Self {
             real_impl: RealSystemFunctions,
-            fallback_enabled: Cell::new(true), // Enable fallback by default
+            fallback_enabled: AtomicBool::new(true), // Enable fallback by default
             fork_queue: CallQueue::new("fork"),
             pipe_queue: CallQueue::new("pipe"),
             close_queue: CallQueue::new("close"),
@@ -133,19 +151,19 @@ impl MockableSystemFunctions {
 
     /// Enable fallback to real implementations when no mock is configured
     pub fn enable_fallback(&self) -> &Self {
-        self.fallback_enabled.set(true);
+        self.fallback_enabled.store(true, Ordering::Relaxed);
         self
     }
 
     /// Disable fallback to real implementations (strict mocking mode)
     pub fn disable_fallback(&self) -> &Self {
-        self.fallback_enabled.set(false);
+        self.fallback_enabled.store(false, Ordering::Relaxed);
         self
     }
 
     /// Check if fallback is enabled
     pub fn is_fallback_enabled(&self) -> bool {
-        self.fallback_enabled.get()
+        self.fallback_enabled.load(Ordering::Relaxed)
     }
 
     // Generic methods for specifying behavior
@@ -193,51 +211,9 @@ impl SystemFunctions for MockableSystemFunctions {
     }
 
     fn _exit(&self, status: c_int) -> ! {
-        if is_mocking_enabled() {
-            // In mock context, we panic instead of exiting
-            panic!("_exit({status}) called in mock context");
-        } else {
-            // Otherwise, use the real implementation
-            #[allow(clippy::used_underscore_items)]
-            self.real_impl._exit(status)
-        }
+        // Just panic in tests, we don't need the global state anymore
+        panic!("_exit({status}) called in mock context");
     }
-}
-
-// Thread-local storage for the current mocking state
-thread_local! {
-    static CURRENT_MOCK: RefCell<Option<MockableSystemFunctions>> = const { RefCell::new(None) };
-    static IS_MOCKING_ENABLED: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Enable mocking for the current thread with the specified mock configuration
-pub fn enable_mocking(mock: &MockableSystemFunctions) {
-    CURRENT_MOCK.with(|m| {
-        *m.borrow_mut() = Some(mock.clone());
-    });
-    IS_MOCKING_ENABLED.with(|e| e.set(true));
-}
-
-/// Disable mocking for the current thread
-pub fn disable_mocking() {
-    CURRENT_MOCK.with(|m| {
-        *m.borrow_mut() = None;
-    });
-    IS_MOCKING_ENABLED.with(|e| e.set(false));
-}
-
-/// Returns true if mocking is currently enabled for the current thread
-pub fn is_mocking_enabled() -> bool {
-    IS_MOCKING_ENABLED.with(std::cell::Cell::get)
-}
-
-/// Get the current mock from thread-local storage
-pub fn get_current_mock() -> MockableSystemFunctions {
-    CURRENT_MOCK.with(|m| {
-        m.borrow()
-            .clone()
-            .expect("No mock available in thread-local storage")
-    })
 }
 
 /// Configuration options for the mock system
@@ -249,10 +225,10 @@ pub enum MockConfig {
     Strict,
 
     /// Configure the mock with a function, using fallback mode
-    ConfiguredWithFallback(Box<dyn FnOnce(&MockableSystemFunctions)>),
+    ConfiguredWithFallback(Box<dyn FnOnce(&MockableSystemFunctions) + Send + Sync>),
 
     /// Configure the mock with a function, using strict mode
-    ConfiguredStrict(Box<dyn FnOnce(&MockableSystemFunctions)>),
+    ConfiguredStrict(Box<dyn FnOnce(&MockableSystemFunctions) + Send + Sync>),
 }
 
 /// Set up mocking environment and execute a test function
@@ -277,22 +253,14 @@ pub fn with_mock_system<R>(
         }
     }
 
-    // Enable mocking with the configured mock
-    enable_mocking(&mock);
-
-    // Run the test function with mocking enabled
-    let result = test_fn(&mock);
-
-    // Disable mocking
-    disable_mocking();
-
-    result
+    // Run the test function with the mock
+    test_fn(&mock)
 }
 
 /// Helper to create a `ConfiguredWithFallback` variant
 pub fn configured_with_fallback<F>(configure_fn: F) -> MockConfig
 where
-    F: FnOnce(&MockableSystemFunctions) + 'static,
+    F: FnOnce(&MockableSystemFunctions) + Send + Sync + 'static,
 {
     MockConfig::ConfiguredWithFallback(Box::new(configure_fn))
 }
@@ -300,7 +268,30 @@ where
 /// Helper to create a `ConfiguredStrict` variant
 pub fn configured_strict<F>(configure_fn: F) -> MockConfig
 where
-    F: FnOnce(&MockableSystemFunctions) + 'static,
+    F: FnOnce(&MockableSystemFunctions) + Send + Sync + 'static,
 {
     MockConfig::ConfiguredStrict(Box::new(configure_fn))
+}
+
+/// Check if mock system functions are enabled (controlled by environment variable)
+/// Returns true unless MOCK_SYSTEM_FUNCTIONS=0 environment variable is set
+pub fn is_mock_system_enabled() -> bool {
+    match std::env::var("MOCK_SYSTEM_FUNCTIONS") {
+        Ok(val) if val == "0" => false,
+        _ => true,
+    }
+}
+
+/// Helper function to enable mock system functions by setting the environment variable
+pub fn enable_mock_system() {
+    unsafe {
+        std::env::set_var("MOCK_SYSTEM_FUNCTIONS", "1");
+    }
+}
+
+/// Helper function to disable mock system functions by setting the environment variable
+pub fn disable_mock_system() {
+    unsafe {
+        std::env::set_var("MOCK_SYSTEM_FUNCTIONS", "0");
+    }
 }

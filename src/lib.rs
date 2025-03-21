@@ -69,6 +69,9 @@ use macros::{debug, error};
 // with our macros (see just above^)
 use tracing::{Level, instrument, span};
 
+#[cfg(feature = "async")]
+mod async_feature;
+
 use libc::c_int;
 use std::fmt::Debug;
 use std::fs::File;
@@ -101,12 +104,15 @@ use MemIsolateError::{CallableDidNotExecute, CallableExecuted, CallableStatusUnk
 pub use serde::{Serialize, de::DeserializeOwned};
 
 // Child process exit status codes
-const CHILD_EXIT_HAPPY: i32 = 0;
-const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 3;
+pub(crate) const CHILD_EXIT_HAPPY: i32 = 0;
+pub(crate) const CHILD_EXIT_IF_READ_CLOSE_FAILED: i32 = 3;
 const CHILD_EXIT_IF_WRITE_FAILED: i32 = 4;
 
 #[cfg(feature = "tracing")]
-const HIGHEST_LEVEL: Level = Level::ERROR;
+pub(crate) const HIGHEST_LEVEL: Level = Level::ERROR;
+
+#[cfg(feature = "async")]
+pub use async_feature::execute_in_isolated_process as execute_in_isolated_process_async;
 
 /// Executes a user-supplied `callable` in a forked child process so that any
 /// memory changes during execution do not affect the parent. The child
@@ -240,18 +246,26 @@ where
 
 #[must_use]
 #[cfg_attr(feature = "tracing", instrument)]
-fn get_system_functions() -> impl SystemFunctions {
+pub(crate) fn get_system_functions() -> impl SystemFunctions {
     // Use the appropriate implementation based on build config
     #[cfg(not(test))]
-    let sys = c::RealSystemFunctions;
+    let sys = c::SystemFunctionsImpl::Real(c::RealSystemFunctions);
 
     #[cfg(test)]
-    let sys = if c::mock::is_mocking_enabled() {
-        // Use the mock from thread-local storage
-        c::mock::get_current_mock()
-    } else {
-        // Create a new fallback mock if no mock is active
-        c::mock::MockableSystemFunctions::with_fallback()
+    let sys = {
+        // Check environment variable to control mock behavior
+        // If MOCK_SYSTEM_FUNCTIONS=0, use real implementation even in tests
+        match std::env::var("MOCK_SYSTEM_FUNCTIONS") {
+            Ok(val) if val == "0" => {
+                debug!("Using real system functions based on environment variable");
+                c::SystemFunctionsImpl::Real(c::RealSystemFunctions)
+            }
+            _ => {
+                // Default to mock with fallback in tests
+                debug!("Using mock system functions with fallback");
+                c::SystemFunctionsImpl::Mock(c::mock::MockableSystemFunctions::with_fallback())
+            }
+        }
     };
 
     debug!("using {:?}", sys);
@@ -288,6 +302,7 @@ fn fork<S: SystemFunctions>(sys: &S) -> Result<ForkReturn, MemIsolateError> {
 fn execute_callable<F, T>(callable: F) -> T
 where
     F: FnOnce() -> T,
+    T: Serialize + DeserializeOwned,
 {
     debug!("starting execution of user-supplied callable");
     #[allow(clippy::let_and_return)]
@@ -322,7 +337,9 @@ fn wait_for_child<S: SystemFunctions>(
 }
 
 #[cfg_attr(feature = "tracing", instrument)]
-fn error_if_child_unhappy(waitpid_bespoke_status: WaitpidStatus) -> Result<(), MemIsolateError> {
+pub(crate) fn error_if_child_unhappy(
+    waitpid_bespoke_status: WaitpidStatus,
+) -> Result<(), MemIsolateError> {
     let result = if let Some(exit_status) = child_process_exited_on_its_own(waitpid_bespoke_status)
     {
         match exit_status {
@@ -352,8 +369,9 @@ fn error_if_child_unhappy(waitpid_bespoke_status: WaitpidStatus) -> Result<(), M
     result
 }
 
+// TODO: Can we serde async?
 #[cfg_attr(feature = "tracing", instrument)]
-fn deserialize_result<T: DeserializeOwned>(buffer: &[u8]) -> Result<T, MemIsolateError> {
+pub(crate) fn deserialize_result<T: DeserializeOwned>(buffer: &[u8]) -> Result<T, MemIsolateError> {
     match bincode::deserialize::<Result<T, MemIsolateError>>(buffer) {
         Ok(Ok(result)) => {
             debug!("successfully deserialized happy result");
