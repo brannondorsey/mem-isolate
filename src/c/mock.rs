@@ -3,6 +3,8 @@ use libc::c_int;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread_local;
 
 // Type for representing a mock result
@@ -52,20 +54,23 @@ pub enum CallBehavior<T> {
 /// A generic queue of call implementations
 #[derive(Clone, Debug)]
 struct CallQueue<T> {
-    queue: RefCell<VecDeque<CallImplementation<T>>>,
+    queue: Arc<Mutex<VecDeque<CallImplementation<T>>>>,
     name: &'static str, // For better error messages
 }
 
 impl<T: Clone> CallQueue<T> {
     fn new(name: &'static str) -> Self {
         Self {
-            queue: RefCell::new(VecDeque::new()),
+            queue: Arc::new(Mutex::new(VecDeque::new())),
             name,
         }
     }
 
     fn push(&self, behavior: CallBehavior<T>) {
-        let mut queue = self.queue.borrow_mut();
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("The queue to unlock inside push()");
         match behavior {
             CallBehavior::Real => queue.push_back(CallImplementation::Real),
             CallBehavior::Mock(result) => {
@@ -78,8 +83,10 @@ impl<T: Clone> CallQueue<T> {
     where
         F: FnOnce() -> Result<T, io::Error>,
     {
-        // Get explicit reference to make the borrow checker happy
-        let mut queue = self.queue.borrow_mut();
+        let mut queue = self
+            .queue
+            .lock()
+            .expect("The queue to unlock inside execute_next()");
         match queue.pop_front() {
             Some(CallImplementation::Real) => real_impl(),
             Some(CallImplementation::Mock(result)) => result.to_result(),
@@ -93,21 +100,34 @@ impl<T: Clone> CallQueue<T> {
 }
 
 /// Mock implementation that returns predefined values and can fall back to real implementation
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MockableSystemFunctions {
     real_impl: RealSystemFunctions,
-    fallback_enabled: Cell<bool>,
+    fallback_enabled: AtomicBool,
     fork_queue: CallQueue<ForkReturn>,
     pipe_queue: CallQueue<PipeFds>,
     close_queue: CallQueue<()>,
     waitpid_queue: CallQueue<c_int>,
 }
 
+impl Clone for MockableSystemFunctions {
+    fn clone(&self) -> Self {
+        Self {
+            real_impl: self.real_impl.clone(),
+            fallback_enabled: AtomicBool::new(self.fallback_enabled.load(Ordering::SeqCst)),
+            fork_queue: self.fork_queue.clone(),
+            pipe_queue: self.pipe_queue.clone(),
+            close_queue: self.close_queue.clone(),
+            waitpid_queue: self.waitpid_queue.clone(),
+        }
+    }
+}
+
 impl Default for MockableSystemFunctions {
     fn default() -> Self {
         Self {
             real_impl: RealSystemFunctions,
-            fallback_enabled: Cell::new(true), // Enable fallback by default
+            fallback_enabled: AtomicBool::new(true), // Enable fallback by default
             fork_queue: CallQueue::new("fork"),
             pipe_queue: CallQueue::new("pipe"),
             close_queue: CallQueue::new("close"),
@@ -133,19 +153,19 @@ impl MockableSystemFunctions {
 
     /// Enable fallback to real implementations when no mock is configured
     pub fn enable_fallback(&self) -> &Self {
-        self.fallback_enabled.set(true);
+        self.fallback_enabled.store(true, Ordering::SeqCst);
         self
     }
 
     /// Disable fallback to real implementations (strict mocking mode)
     pub fn disable_fallback(&self) -> &Self {
-        self.fallback_enabled.set(false);
+        self.fallback_enabled.store(false, Ordering::SeqCst);
         self
     }
 
     /// Check if fallback is enabled
     pub fn is_fallback_enabled(&self) -> bool {
-        self.fallback_enabled.get()
+        self.fallback_enabled.load(Ordering::SeqCst)
     }
 
     // Generic methods for specifying behavior
