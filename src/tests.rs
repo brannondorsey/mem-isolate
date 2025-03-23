@@ -76,6 +76,15 @@ fn simple_example() {
     assert_eq!(result, MyResult { value: 42 });
 }
 
+#[cfg(feature = "async")]
+#[tokio::test]
+async fn simple_example_async() {
+    let result = execute_in_isolated_process_async(async || MyResult { value: 42 })
+        .await
+        .unwrap();
+    assert_eq!(result, MyResult { value: 42 });
+}
+
 #[test]
 #[allow(static_mut_refs)]
 fn static_memory_mutation_without_isolation() {
