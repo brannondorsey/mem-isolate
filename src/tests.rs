@@ -76,6 +76,15 @@ fn simple_example() {
     assert_eq!(result, MyResult { value: 42 });
 }
 
+#[cfg(feature = "async")]
+#[tokio::test]
+async fn simple_example_async() {
+    let result = execute_in_isolated_process_async(async || MyResult { value: 42 })
+        .await
+        .unwrap();
+    assert_eq!(result, MyResult { value: 42 });
+}
+
 #[test]
 #[allow(static_mut_refs)]
 fn static_memory_mutation_without_isolation() {
@@ -108,6 +117,27 @@ fn static_memory_mutation_with_isolation() {
         );
     }
 }
+
+#[cfg(feature = "async")]
+#[tokio::test]
+#[allow(static_mut_refs)]
+async fn static_memory_mutation_with_isolation_async() {
+    static mut MEMORY: bool = false;
+    let mutate = async || unsafe { MEMORY = true };
+
+    // Modify static memory in isolated process
+    execute_in_isolated_process_async(mutate).await.unwrap();
+
+    // Verify the change does not affect parent process
+    unsafe {
+        assert!(
+            !MEMORY,
+            "Static memory should remain unmodified in parent process"
+        );
+    }
+}
+
+// TODO: Add async version of the rest the tests
 
 #[test]
 fn isolate_memory_leak() {
