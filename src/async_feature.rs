@@ -85,6 +85,9 @@ where
     match fork(&*sys)? {
         ForkReturn::Child => {
             std::thread::spawn(move || {
+                // Check what kind of runtime we're using
+                // TODO: Require the caller to create the runtime by passing a closure to this function
+                //       Do we need to enable more tokio features to give the caller the most control?
                 let rt =
                     tokio::runtime::Runtime::new().expect("failed to create new Tokio runtime");
                 rt.block_on(async {
