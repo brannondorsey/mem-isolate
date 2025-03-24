@@ -51,8 +51,11 @@
 //!   mostly `debug!` and `error!` level. See [`examples/tracing.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/examples/tracing.rs)
 //!   for an example.
 //!
-//! By default, no additional features are enabled.
+//! * `async`: Enable async/await support through an async version of the main function.
+//!   This feature adds [`execute_in_isolated_process_async`] which works like the synchronous version
+//!   but with async functions. Requires the tokio runtime.
 //!
+//! By default, no additional features are enabled.
 #![warn(missing_docs)]
 #![warn(clippy::pedantic, clippy::unwrap_used)]
 #![warn(missing_debug_implementations)]

@@ -45,6 +45,30 @@ use tokio::task::JoinError;
 // Re-export the serde traits our public API depends on
 pub use serde::{Serialize, de::DeserializeOwned};
 
+/// Just like [`execute_in_isolated_process`], but async.
+///
+/// It returns a `Future` and its callable must as well. Async support **must**
+/// be supported by the tokio runtime, as this function calls `tokio::spawn`
+/// under the hood. If you do not with to inherit use of tokio in your project,
+/// you should not enable this feature.
+///
+/// # Example
+///
+/// ```rust
+/// use mem_isolate::execute_in_isolated_process_async;
+///
+/// #[tokio::main]
+/// async fn main() {
+///     let result = execute_in_isolated_process_async(async || {
+///         // Leak 1KiB of memory
+///         let data: Vec<u8> = Vec::with_capacity(1024);
+///         let data = Box::new(data);
+///         Box::leak(data);
+///         42
+///     }).await.unwrap();
+///     assert_eq!(result, 42);
+/// }
+/// ```
 #[cfg_attr(feature = "tracing", instrument(skip(callable)))]
 pub async fn execute_in_isolated_process<F, Fut, T>(callable: F) -> Result<T, MemIsolateError>
 where
