@@ -118,6 +118,25 @@ fn static_memory_mutation_with_isolation() {
     }
 }
 
+#[cfg(feature = "async")]
+#[tokio::test]
+#[allow(static_mut_refs)]
+async fn static_memory_mutation_with_isolation_async() {
+    static mut MEMORY: bool = false;
+    let mutate = async || unsafe { MEMORY = true };
+
+    // Modify static memory in isolated process
+    execute_in_isolated_process_async(mutate).await.unwrap();
+
+    // Verify the change does not affect parent process
+    unsafe {
+        assert!(
+            !MEMORY,
+            "Static memory should remain unmodified in parent process"
+        );
+    }
+}
+
 #[test]
 fn isolate_memory_leak() {
     fn check_memory_exists_and_holds_vec_data(ptr_str: &str) -> bool {
