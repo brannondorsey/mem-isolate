@@ -137,6 +137,8 @@ async fn static_memory_mutation_with_isolation_async() {
     }
 }
 
+// TODO: Add async version of the rest the tests
+
 #[test]
 fn isolate_memory_leak() {
     fn check_memory_exists_and_holds_vec_data(ptr_str: &str) -> bool {
