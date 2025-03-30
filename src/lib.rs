@@ -69,7 +69,7 @@ use macros::{debug, error};
 // with our macros (see just above^)
 use tracing::{Level, instrument, span};
 
-use libc::c_int;
+use libc::{EINTR, c_int};
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -305,12 +305,18 @@ fn wait_for_child<S: SystemFunctions>(
     sys: &S,
     child_pid: c_int,
 ) -> Result<WaitpidStatus, MemIsolateError> {
-    let waitpid_bespoke_status = match sys.waitpid(child_pid) {
-        Ok(status) => status,
-        Err(wait_err) => {
-            let err = CallableStatusUnknown(WaitFailed(wait_err));
-            error!("error waiting for child process, propagating {:?}", err);
-            return Err(err);
+    let waitpid_bespoke_status = loop {
+        match sys.waitpid(child_pid) {
+            Ok(status) => break status,
+            Err(wait_err) => {
+                if wait_err.raw_os_error() == Some(EINTR) {
+                    debug!("waitpid interrupted with EINTR, retrying");
+                    continue;
+                }
+                let err = CallableStatusUnknown(WaitFailed(wait_err));
+                error!("error waiting for child process, propagating {:?}", err);
+                return Err(err);
+            }
         }
     };
 
