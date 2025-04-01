@@ -14,6 +14,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use std::process;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time;
@@ -547,7 +548,7 @@ fn waitpid_child_killed_by_signal_after_suspension_and_continuation() {
 }
 
 #[test]
-fn waitpid_interrupted_by_signal() {
+fn waitpid_interrupted_by_signal_mock() {
     with_mock_system(
         configured_with_fallback(|mock| {
             // waitpid() will return EINTR if a signal is delivered to the parent,
@@ -563,4 +564,49 @@ fn waitpid_interrupted_by_signal() {
             assert_eq!(result.unwrap(), MyResult { value: 42 });
         },
     );
+}
+
+#[test]
+fn waitpid_interrupted_by_signal_real() {
+    static SIGNAL_RECEIVED: AtomicBool = AtomicBool::new(false);
+
+    extern "C" fn sigint_handler(_signal: i32) {
+        println!("SIGINT received");
+        SIGNAL_RECEIVED.store(true, Ordering::SeqCst);
+    }
+
+    unsafe {
+        libc::signal(libc::SIGINT, sigint_handler as usize);
+    }
+
+    let (begin_tx, begin_rx) = channel();
+    let (end_tx, end_rx) = channel::<Result<(), MemIsolateError>>();
+
+    thread::spawn(move || {
+        begin_tx.send(()).unwrap();
+        let result = execute_in_isolated_process(|| {
+            thread::sleep(Duration::from_secs(5));
+        });
+        end_tx.send(result).unwrap();
+    });
+
+    let thread_spawned = begin_rx.recv().is_ok();
+    assert!(thread_spawned);
+
+    let pid = i32::try_from(process::id()).expect("process id is too large to fit in i32");
+    unsafe {
+        libc::kill(pid, libc::SIGINT);
+    }
+
+    let signal_received = loop {
+        let signal_received = SIGNAL_RECEIVED.load(Ordering::SeqCst);
+        if signal_received {
+            break signal_received;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(signal_received);
+
+    let result = end_rx.recv().unwrap();
+    assert!(result.is_ok());
 }
