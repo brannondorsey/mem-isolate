@@ -579,6 +579,7 @@ fn waitpid_interrupted_by_signal_real() {
         libc::signal(libc::SIGINT, sigint_handler as usize);
     }
 
+    let timeout = Duration::from_secs(1); // Used for several things
     let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
     let tmp_path_clone = tmp_file.path().to_path_buf();
     let tmp_path_for_closure = tmp_path_clone.clone();
@@ -589,7 +590,6 @@ fn waitpid_interrupted_by_signal_real() {
         thread_begin_tx.send(()).unwrap();
         let result = execute_in_isolated_process(move || {
             // Wait for the child process to signal it's ready
-            let timeout = Duration::from_secs(1);
             let child_waited_for_pidfile_success = matches!(
                 wait_for_pidfile_to_populate(&tmp_path_for_closure, timeout),
                 WaitForPidfileToPopulateResult::Success(_)
@@ -611,10 +611,15 @@ fn waitpid_interrupted_by_signal_real() {
     }
 
     // Wait for the signal handler to run
+    let start = time::Instant::now();
     loop {
         if SIGNAL_RECEIVED.load(Ordering::SeqCst) {
             break;
         }
+        assert!(
+            start.elapsed() <= timeout,
+            "Signal handler did not run before timeout"
+        );
         thread::sleep(Duration::from_millis(10));
     }
 
@@ -623,7 +628,7 @@ fn waitpid_interrupted_by_signal_real() {
 
     // Check that execute_in_isolated_process received the pidfile update...
     let result = result_rx
-        .recv_timeout(Duration::from_secs(1))
+        .recv_timeout(timeout)
         .expect("Failed to receive result");
     // ...and that it had a happy exit, rather than a MemIsolateError
     assert!(result.is_ok());
