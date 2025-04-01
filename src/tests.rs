@@ -579,34 +579,54 @@ fn waitpid_interrupted_by_signal_real() {
         libc::signal(libc::SIGINT, sigint_handler as usize);
     }
 
-    let (begin_tx, begin_rx) = channel();
-    let (end_tx, end_rx) = channel::<Result<(), MemIsolateError>>();
+    let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
+    let tmp_path_clone = tmp_file.path().to_path_buf();
+    let tmp_path_for_closure = tmp_path_clone.clone();
 
+    let (thread_begin_tx, thread_begin_rx) = channel::<()>();
+    let (result_tx, result_rx) = channel::<Result<bool, MemIsolateError>>();
     thread::spawn(move || {
-        begin_tx.send(()).unwrap();
-        let result = execute_in_isolated_process(|| {
-            thread::sleep(Duration::from_secs(5));
+        thread_begin_tx.send(()).unwrap();
+        let result = execute_in_isolated_process(move || {
+            // Wait for the child process to signal it's ready
+            let timeout = Duration::from_secs(1);
+            let child_waited_for_pidfile_success = matches!(
+                wait_for_pidfile_to_populate(&tmp_path_for_closure, timeout),
+                WaitForPidfileToPopulateResult::Success(_)
+            );
+            child_waited_for_pidfile_success
         });
-        end_tx.send(result).unwrap();
+        result_tx.send(result).unwrap();
     });
 
-    let thread_spawned = begin_rx.recv().is_ok();
-    assert!(thread_spawned);
+    // Wait for the thread to spawn. Without his, I can regularly trigger this error:
+    // https://github.com/rust-lang/rust/blob/0b45675cfcec57f30a3794e1a1e18423aa9cf200/library/std/src/thread/mod.rs#L549
+    // TODO: See if we can explain _why_ that is... and if a bug report needs opening on Rust std::thread?
+    thread_begin_rx.recv().unwrap();
 
+    // Send SIGINT to parent process
     let pid = i32::try_from(process::id()).expect("process id is too large to fit in i32");
     unsafe {
         libc::kill(pid, libc::SIGINT);
     }
 
-    let signal_received = loop {
-        let signal_received = SIGNAL_RECEIVED.load(Ordering::SeqCst);
-        if signal_received {
-            break signal_received;
+    // Wait for the signal handler to run
+    loop {
+        if SIGNAL_RECEIVED.load(Ordering::SeqCst) {
+            break;
         }
         thread::sleep(Duration::from_millis(10));
-    };
-    assert!(signal_received);
+    }
 
-    let result = end_rx.recv().unwrap();
+    // Notify the child process that it can now shutdown
+    write_pid_to_file(&tmp_path_clone).expect("Failed to write pid to temp file");
+
+    // Check that execute_in_isolated_process received the pidfile update...
+    let result = result_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("Failed to receive result");
+    // ...and that it had a happy exit, rather than a MemIsolateError
     assert!(result.is_ok());
+    let child_waited_for_pidfile_success = result.unwrap();
+    assert!(child_waited_for_pidfile_success);
 }
