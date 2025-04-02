@@ -70,6 +70,16 @@ fn wait_for_pidfile_to_populate(
     }
 }
 
+#[cfg(feature = "tracing")]
+#[ctor::ctor]
+fn before_tests() {
+    use tracing_subscriber::EnvFilter;
+    let env_filter = EnvFilter::builder()
+        .with_default_directive(Level::INFO.into())
+        .from_env_lossy();
+    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+}
+
 #[test]
 fn simple_example() {
     let result = execute_in_isolated_process(|| MyResult { value: 42 }).unwrap();
