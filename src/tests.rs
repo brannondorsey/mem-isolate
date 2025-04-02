@@ -566,17 +566,25 @@ fn waitpid_interrupted_by_signal_mock() {
     );
 }
 
+// TODO: This test is failing even when the fix is reverted :thinking:
 #[test]
 fn waitpid_interrupted_by_signal_real() {
     static SIGNAL_RECEIVED: AtomicBool = AtomicBool::new(false);
 
-    extern "C" fn sigint_handler(_signal: i32) {
-        println!("SIGINT received");
+    extern "C" fn signal_handler(signal: i32) {
+        println!("Received signal: {signal}");
         SIGNAL_RECEIVED.store(true, Ordering::SeqCst);
     }
 
+    let signal = libc::SIGUSR1;
+    let sigaction = libc::sigaction {
+        sa_sigaction: signal_handler as usize,
+        sa_mask: unsafe { std::mem::zeroed() },
+        sa_flags: 0, // Explicitly not using SA_RESTART
+        sa_restorer: None,
+    };
     unsafe {
-        libc::signal(libc::SIGINT, sigint_handler as usize);
+        libc::sigaction(signal, &sigaction, std::ptr::null_mut());
     }
 
     let timeout = Duration::from_secs(1); // Used for several things
@@ -589,13 +597,16 @@ fn waitpid_interrupted_by_signal_real() {
     thread::spawn(move || {
         thread_begin_tx.send(()).unwrap();
         let result = execute_in_isolated_process(move || {
+            println!("Child process waiting for pidfile success");
             // Wait for the child process to signal it's ready
             let child_waited_for_pidfile_success = matches!(
                 wait_for_pidfile_to_populate(&tmp_path_for_closure, timeout),
                 WaitForPidfileToPopulateResult::Success(_)
             );
+            println!("Child waited for pidfile success: {child_waited_for_pidfile_success}");
             child_waited_for_pidfile_success
         });
+        println!("Child result: {result:?}");
         result_tx.send(result).unwrap();
     });
 
@@ -604,16 +615,18 @@ fn waitpid_interrupted_by_signal_real() {
     // TODO: See if we can explain _why_ that is... and if a bug report needs opening on Rust std::thread?
     thread_begin_rx.recv().unwrap();
 
-    // Send SIGINT to parent process
+    thread::sleep(Duration::from_millis(10));
+    // Spam SIGINT to the parent process
     let pid = i32::try_from(process::id()).expect("process id is too large to fit in i32");
     unsafe {
-        libc::kill(pid, libc::SIGINT);
+        libc::kill(pid, signal);
     }
 
     // Wait for the signal handler to run
     let start = time::Instant::now();
     loop {
         if SIGNAL_RECEIVED.load(Ordering::SeqCst) {
+            println!("Signal handler ran");
             break;
         }
         assert!(
