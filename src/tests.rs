@@ -237,16 +237,12 @@ fn serialization_error() {
         _data: vec![1, 2, 3],
     });
 
-    // Verify we get the expected serialization error
-    match result {
-        Err(MemIsolateError::CallableExecuted(CallableExecutedError::SerializationFailed(err))) => {
-            assert!(
-                err.contains("Fake serialization error"),
-                "Expected error about sequence length, got: {err}"
-            );
-        }
-        other => panic!("Expected SerializationFailed error, got: {other:?}"),
-    }
+    assert!(matches!(
+        result,
+        Err(MemIsolateError::CallableExecuted(
+            CallableExecutedError::SerializationFailed
+        ))
+    ));
 }
 
 #[test]
