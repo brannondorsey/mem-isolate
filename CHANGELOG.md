@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3](https://github.com/brannondorsey/mem-isolate/compare/v0.1.2...v0.1.3) - 2025-04-05
+
+### Fixed
+
+- Handle syscall interruption by retrying `EINTR` errors encountered during `waitpid()` ([#35](https://github.com/brannondorsey/mem-isolate/pull/35))
+
+### Other
+
+- Cargo update ([#39](https://github.com/brannondorsey/mem-isolate/pull/39))
+- Simplify MockableSystemFunctions Debug impl ([#37](https://github.com/brannondorsey/mem-isolate/pull/37))
+- Add optional tracing to tests ([#36](https://github.com/brannondorsey/mem-isolate/pull/36))
+- Refactor `fork()` into a subroutine ([#29](https://github.com/brannondorsey/mem-isolate/pull/29))
+
 ## [0.1.2](https://github.com/brannondorsey/mem-isolate/compare/v0.1.1...v0.1.2) - 2025-03-16
 
 ### Added
