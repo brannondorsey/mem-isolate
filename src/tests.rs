@@ -14,7 +14,6 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use std::process;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time;
@@ -564,87 +563,4 @@ fn waitpid_interrupted_by_signal_mock() {
             assert_eq!(result.unwrap(), MyResult { value: 42 });
         },
     );
-}
-
-// TODO: This test is failing even when the fix is reverted :thinking:
-#[test]
-fn waitpid_interrupted_by_signal_real() {
-    static SIGNAL_RECEIVED: AtomicBool = AtomicBool::new(false);
-
-    extern "C" fn signal_handler(signal: i32) {
-        println!("Received signal: {signal}");
-        SIGNAL_RECEIVED.store(true, Ordering::SeqCst);
-    }
-
-    let signal = libc::SIGUSR1;
-    let sigaction = libc::sigaction {
-        sa_sigaction: signal_handler as usize,
-        sa_mask: unsafe { std::mem::zeroed() },
-        sa_flags: 0, // Explicitly not using SA_RESTART
-        sa_restorer: None,
-    };
-    unsafe {
-        libc::sigaction(signal, &sigaction, std::ptr::null_mut());
-    }
-
-    let timeout = Duration::from_secs(1); // Used for several things
-    let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
-    let tmp_path_clone = tmp_file.path().to_path_buf();
-    let tmp_path_for_closure = tmp_path_clone.clone();
-
-    let (thread_begin_tx, thread_begin_rx) = channel::<()>();
-    let (result_tx, result_rx) = channel::<Result<bool, MemIsolateError>>();
-    thread::spawn(move || {
-        thread_begin_tx.send(()).unwrap();
-        let result = execute_in_isolated_process(move || {
-            println!("Child process waiting for pidfile success");
-            // Wait for the child process to signal it's ready
-            let child_waited_for_pidfile_success = matches!(
-                wait_for_pidfile_to_populate(&tmp_path_for_closure, timeout),
-                WaitForPidfileToPopulateResult::Success(_)
-            );
-            println!("Child waited for pidfile success: {child_waited_for_pidfile_success}");
-            child_waited_for_pidfile_success
-        });
-        println!("Child result: {result:?}");
-        result_tx.send(result).unwrap();
-    });
-
-    // Wait for the thread to spawn. Without his, I can regularly trigger this error:
-    // https://github.com/rust-lang/rust/blob/0b45675cfcec57f30a3794e1a1e18423aa9cf200/library/std/src/thread/mod.rs#L549
-    // TODO: See if we can explain _why_ that is... and if a bug report needs opening on Rust std::thread?
-    thread_begin_rx.recv().unwrap();
-
-    thread::sleep(Duration::from_millis(10));
-    // Spam SIGINT to the parent process
-    let pid = i32::try_from(process::id()).expect("process id is too large to fit in i32");
-    unsafe {
-        libc::kill(pid, signal);
-    }
-
-    // Wait for the signal handler to run
-    let start = time::Instant::now();
-    loop {
-        if SIGNAL_RECEIVED.load(Ordering::SeqCst) {
-            println!("Signal handler ran");
-            break;
-        }
-        assert!(
-            start.elapsed() <= timeout,
-            "Signal handler did not run before timeout"
-        );
-        thread::sleep(Duration::from_millis(10));
-    }
-
-    // Notify the child process that it can now shutdown
-    write_pid_to_file(&tmp_path_clone).expect("Failed to write pid to temp file");
-
-    // Check that execute_in_isolated_process received the pidfile update...
-    let result = result_rx
-        .recv_timeout(timeout)
-        .expect("Failed to receive result");
-    // ...and that it had a happy exit, rather than a MemIsolateError
-    assert!(result.is_ok());
-    let child_waited_for_pidfile_success = result.unwrap();
-    assert!(child_waited_for_pidfile_success);
 }
