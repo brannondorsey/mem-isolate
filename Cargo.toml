@@ -30,6 +30,7 @@ tracing = { version = "0.1.41", optional = true }
 
 [dev-dependencies]
 criterion = "0.5.1"
+ctor = "0.4.1"
 rand = "0.9.0"
 tempfile = "3.18.0"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
