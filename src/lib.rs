@@ -305,6 +305,7 @@ fn wait_for_child<S: SystemFunctions>(
     sys: &S,
     child_pid: c_int,
 ) -> Result<WaitpidStatus, MemIsolateError> {
+    debug!("waiting for child process");
     let waitpid_bespoke_status = loop {
         match sys.waitpid(child_pid) {
             Ok(status) => break status,
