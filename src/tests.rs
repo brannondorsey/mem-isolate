@@ -37,6 +37,10 @@ fn error_enfile() -> io::Error {
     io::Error::from_raw_os_error(libc::ENFILE)
 }
 
+fn error_eintr() -> io::Error {
+    io::Error::from_raw_os_error(libc::EINTR)
+}
+
 fn write_pid_to_file(path: &Path) -> io::Result<()> {
     let pid: u32 = process::id();
     fs::write(path, format!("{pid}\n"))
@@ -540,4 +544,23 @@ fn waitpid_child_killed_by_signal_after_suspension_and_continuation() {
             CallableStatusUnknownError::ChildProcessKilledBySignal(libc::SIGKILL)
         ))
     ));
+}
+
+#[test]
+fn waitpid_interrupted_by_signal_mock() {
+    with_mock_system(
+        configured_with_fallback(|mock| {
+            // waitpid() will return EINTR if a signal is delivered to the parent,
+            // we want to continue in this case. Here we mock the first three calls to
+            // waitpid() returning EINTR, then the fourth call will fallback to the
+            // real syscall.
+            mock.expect_waitpid(CallBehavior::Mock(Err(error_eintr())));
+            mock.expect_waitpid(CallBehavior::Mock(Err(error_eintr())));
+            mock.expect_waitpid(CallBehavior::Mock(Err(error_eintr())));
+        }),
+        |_| {
+            let result = execute_in_isolated_process(|| MyResult { value: 42 });
+            assert_eq!(result.unwrap(), MyResult { value: 42 });
+        },
+    );
 }
