@@ -11,7 +11,7 @@ jobs:
     name: Build & Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       # selecting a toolchain either by action or manual `rustup` calls should
       # happen before the cache plugin, as the cache uses the current rustc
@@ -21,14 +21,14 @@ jobs:
           rustup toolchain install stable --profile minimal
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
         with:
           workspaces: |
             . -> target
 
       # Manages cargo installs with proper caching support
       - name: Install cargo-hack
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@f1390fd0d8205ae79e5e57b1d1e300dceeb4163e # v2
         with:
           # An arbitrary version SemVer constrained to prevent breaking CI as
           # time goes on. Feel free to bump.

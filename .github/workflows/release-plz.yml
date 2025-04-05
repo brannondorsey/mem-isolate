@@ -18,13 +18,13 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4
         with:
           fetch-depth: 0
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
-        uses: release-plz/action@476794ede164c5137bfc3a1dc6ed3675275690f9 # v0.5.99
+        uses: release-plz/action@7419a2cb1535b9c0e852b4dec626967baf65c022 # v0.5.102
         with:
           command: release
         env:
@@ -43,13 +43,13 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 #v4
         with:
           fetch-depth: 0
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
-        uses: release-plz/action@476794ede164c5137bfc3a1dc6ed3675275690f9 # v0.5.99
+        uses: release-plz/action@7419a2cb1535b9c0e852b4dec626967baf65c022 # v0.5.102
         with:
           command: release-pr
         env:
