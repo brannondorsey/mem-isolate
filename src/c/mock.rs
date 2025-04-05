@@ -93,7 +93,7 @@ impl<T: Clone> CallQueue<T> {
 }
 
 /// Mock implementation that returns predefined values and can fall back to real implementation
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct MockableSystemFunctions {
     real_impl: RealSystemFunctions,
     fallback_enabled: Cell<bool>,
@@ -101,6 +101,13 @@ pub struct MockableSystemFunctions {
     pipe_queue: CallQueue<PipeFds>,
     close_queue: CallQueue<()>,
     waitpid_queue: CallQueue<c_int>,
+}
+
+// The derived Debug impl is quite verbose
+impl std::fmt::Debug for MockableSystemFunctions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MockableSystemFunctions")
+    }
 }
 
 impl Default for MockableSystemFunctions {
