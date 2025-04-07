@@ -27,7 +27,7 @@ Example use cases:
 
 * Run code with a known memory leak
 * Run code that fragments the heap
-* Run `unsafe` code
+* Erase memory mutations from `unsafe` code before continuing with your program
 * Run your code 1ms slower (*har har* 😉, see [limitations](#limitations))
 
 > NOTE: Because of its heavy use of POSIX system calls, this crate only supports Unix-like operating systems (e.g., Linux, macOS, BSD). Windows and wasm support are not planned at this time.
