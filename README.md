@@ -1,4 +1,4 @@
-# `mem-isolate`: *Run unsafe code safely*
+# `mem-isolate`: *Contain memory leaks and fragmentation*
 
 [![Build Status](https://github.com/brannondorsey/mem-isolate/actions/workflows/build.yml/badge.svg)](https://github.com/brannondorsey/mem-isolate/actions/workflows/build.yml)
 

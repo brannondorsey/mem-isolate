@@ -1,4 +1,4 @@
-//! # `mem-isolate`: *Run unsafe code safely*
+//! # `mem-isolate`: *Contain memory leaks and fragmentation*
 //!
 //! It runs your function via a `fork()`, waits for the result, and returns it.
 //!
