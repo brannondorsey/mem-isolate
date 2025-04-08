@@ -129,6 +129,16 @@ const HIGHEST_LEVEL: Level = Level::ERROR;
 /// // However, the memory is not leaked in the parent process here
 /// ```
 ///
+/// # Safety
+///
+/// Because this function calls `fork()`, it should only be used in single-threaded
+/// environments (unless you know what you're doing).
+///
+/// Additionally, if your code has any mutable references, static variables, or
+/// raw pointers, those will not be modified as you might expect. See the
+/// [**Limitations** section](https://github.com/brannondorsey/mem-isolate/blob/main/README.md#limitations)
+/// of the README for more details.
+///
 /// # Errors
 ///
 /// Error handling is organized into three levels:
