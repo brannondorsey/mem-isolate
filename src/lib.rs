@@ -38,6 +38,10 @@
 //!
 //! Windows and wasm support are not planned at this time.
 //!
+//! ## Limitations
+//!
+//! There are a whole host of things that can go wrong, or surprise you, when `fork()` is used. See the
+//! [README](https://github.com/brannondorsey/mem-isolate/blob/main/README.md#limitations) for more details.
 //!
 //! ## Feature Flags
 //!
