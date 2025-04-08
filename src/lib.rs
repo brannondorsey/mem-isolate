@@ -1,4 +1,4 @@
-//! # `mem-isolate`: *Run unsafe code safely*
+//! # `mem-isolate`: *Contain memory leaks and fragmentation*
 //!
 //! It runs your function via a `fork()`, waits for the result, and returns it.
 //!
@@ -38,6 +38,10 @@
 //!
 //! Windows and wasm support are not planned at this time.
 //!
+//! ## Limitations
+//!
+//! There are a whole host of things that can go wrong, or surprise you, when `fork()` is used. See the
+//! [README](https://github.com/brannondorsey/mem-isolate/blob/main/README.md#limitations) for more details.
 //!
 //! ## Feature Flags
 //!
@@ -128,6 +132,16 @@ const HIGHEST_LEVEL: Level = Level::ERROR;
 /// let _ = execute_in_isolated_process(leaky_fn);
 /// // However, the memory is not leaked in the parent process here
 /// ```
+///
+/// # Safety
+///
+/// Because this function calls `fork()`, it should only be used in single-threaded
+/// environments (unless you know what you're doing).
+///
+/// Additionally, if your code has any mutable references, static variables, or
+/// raw pointers, those will not be modified as you might expect. See the
+/// [**Limitations** section](https://github.com/brannondorsey/mem-isolate/blob/main/README.md#limitations)
+/// of the README for more details.
 ///
 /// # Errors
 ///

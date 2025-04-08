@@ -1,7 +1,7 @@
 [package]
 name = "mem-isolate"
 version = "0.1.3"
-description = "Run unsafe code safely"
+description = "Contain memory leaks and fragmentation"
 edition = "2024"
 authors = ["Brannon Dorsey <brannon@brannondorsey.com>"]
 license = "MIT OR Apache-2.0"
