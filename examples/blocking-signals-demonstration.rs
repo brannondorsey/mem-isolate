@@ -1,3 +1,11 @@
+//! This example demonstrates how to block signals in a parent process while
+//! executing code in an isolated process.
+//!
+//! This is useful if you want to ensure that the parent process is not killed
+//! while the isolated process is running. This example is great for illustrating
+//! how signal blocking works, but if you want to just copy and paste some code,
+//! see `blocking-signals-minimal.rs`
+
 use mem_isolate::{MemIsolateError, execute_in_isolated_process};
 use nix::errno::Errno;
 use nix::sys::signal::{SigSet, SigmaskHow, sigprocmask};
@@ -15,7 +23,7 @@ fn main() -> Result<(), MemIsolateError> {
     let (block_signals, restore_signals) = get_block_and_restore_signal_closures();
 
     // Block all signals right before calling `mem_isolate::execute_in_isolated_process()`
-    println!("Parent: blocking all signals");
+    println!("Parent: Blocking all signals");
     block_signals().expect("Failed to block signals");
 
     // Kick-off a subprocess that will send a SIGTERM to this process
@@ -38,7 +46,7 @@ fn main() -> Result<(), MemIsolateError> {
         wait_time_for_readability.as_secs()
     );
     thread::sleep(wait_time_for_readability);
-    println!("Parent: restoring signals, expect the parent to now recieve the SIGTERM");
+    println!("Parent: Restoring signals, expect the parent to now recieve the SIGTERM");
     restore_signals().expect("Failed to restore signals");
     // WARNING: Don't expect code to ever reach this point, because the pending SIGTERM will kill the parent process
     // as soon as we unblock the SIGTERM that has been pending this whole time
