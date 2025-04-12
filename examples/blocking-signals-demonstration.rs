@@ -4,7 +4,7 @@
 //! This is useful if:
 //!
 //! 1. You want to simulate the expected behavior of running your code without
-//!    `mem_isolate::execute_in_isolated_process()`, which would be gauranteed
+//!    `mem_isolate::execute_in_isolated_process()`, which would be guaranteed
 //!    to treat signals the same both inside and outside of the `callable()`
 //!    function.
 //! 2. You want to prevent either process from being interrupted by signals
@@ -23,6 +23,10 @@
 //!
 //! NOTE: Because both SIGKILL and SIGSTOP are unblockable, nothing can be done
 //! to prevent them from killing the parent process or the child process.
+//!
+//! WARNING: Do not expect signal handling to work as you might think in a
+//! multi-threaded program. It is not recommended to use `mem_isolate` in a
+//! multi-threaded program anyway, so that's generally OK.
 
 use mem_isolate::{MemIsolateError, execute_in_isolated_process};
 use nix::errno::Errno;
