@@ -1,5 +1,5 @@
 //! See `blocking-signals-demonstration.rs` for a more detailed example of
-//! how signal blocking works at runtime.
+//! how signal blocking works at runtime, and why you might want to do it.
 //!
 //! Use this example for copy + paste code snippets.
 
@@ -13,10 +13,12 @@ fn main() -> Result<(), MemIsolateError> {
     let (block_signals, restore_signals) = get_block_and_restore_signal_closures();
     block_signals().expect("Failed to block signals");
 
-    // Run your code in an isolated process
+    // Run your code in an isolated process. NOTE: The child process created by
+    // `fork()` inside `execute_in_isolated_process()` will inherit the signal
+    // mask set by main process just above.
     let result = execute_in_isolated_process(|| ());
 
-    // Restore the signal mask
+    // Restore the signal mask, unblocking all signals
     restore_signals().expect("Failed to restore signals");
     result
 }

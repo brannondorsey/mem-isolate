@@ -1,10 +1,28 @@
 //! This example demonstrates how to block signals in a parent process while
 //! executing code in an isolated process.
 //!
-//! This is useful if you want to ensure that the parent process is not killed
-//! while the isolated process is running. This example is great for illustrating
-//! how signal blocking works, but if you want to just copy and paste some code,
-//! see `blocking-signals-minimal.rs`
+//! This is useful if:
+//!
+//! 1. You want to simulate the expected behavior of running your code without
+//!    `mem_isolate::execute_in_isolated_process()`, which would be gauranteed
+//!    to treat signals the same both inside and outside of the `callable()`
+//!    function.
+//! 2. You want to prevent either process from being interrupted by signals
+//!    while your `callable()` is running.
+//! 3. You want to ensure that the parent process is not killed while the
+//!    isolated process is running, leaving an orphaned child process.
+//!
+//! It is important to remember that `mem_isolate::execute_in_isolated_process()`
+//! uses `fork()` under the hood, which creates a child process that will not
+//! receive signals sent to the main process as your `callable()` would otherwise.
+//!
+//! Run this example with `cargo run --example blocking-signals-demonstration`
+//!
+//! This example is great for illustrating how signal blocking works, but if you
+//! want to just copy and paste some code, see `blocking-signals-minimal.rs`
+//!
+//! NOTE: Because both SIGKILL and SIGSTOP are unblockable, nothing can be done
+//! to prevent them from killing the parent process or the child process.
 
 use mem_isolate::{MemIsolateError, execute_in_isolated_process};
 use nix::errno::Errno;
@@ -22,14 +40,17 @@ fn main() -> Result<(), MemIsolateError> {
     // Get closures for blocking and restoring signals
     let (block_signals, restore_signals) = get_block_and_restore_signal_closures();
 
-    // Block all signals right before calling `mem_isolate::execute_in_isolated_process()`
+    // Block all signals before calling `mem_isolate::execute_in_isolated_process()`
+    // This ensures the main program won't be killed leaving an orphaned child process
     println!("Parent: Blocking all signals");
     block_signals().expect("Failed to block signals");
 
     // Kick-off a subprocess that will send a SIGTERM to this process
     let sigterm_sender_proc = send_sigterm_to_parent(Duration::from_secs(1));
 
-    // Execute the user-defined callable in an isolated process
+    // Run your code in an isolated process. NOTE: The child process created by
+    // `fork()` inside `execute_in_isolated_process()` will inherit the signal
+    // mask set by main process just above.
     let result = execute_in_isolated_process(move || {
         println!(
             "\nChild: I've started executing a user-defined callable. I'll wait for {} seconds before exiting...",
@@ -50,7 +71,7 @@ fn main() -> Result<(), MemIsolateError> {
     restore_signals().expect("Failed to restore signals");
     // WARNING: Don't expect code to ever reach this point, because the pending SIGTERM will kill the parent process
     // as soon as we unblock the SIGTERM that has been pending this whole time
-
+    println!("Parent: Notice how I never ran");
     result
 }
 
