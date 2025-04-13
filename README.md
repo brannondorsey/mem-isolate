@@ -66,8 +66,8 @@ In performance-critical systems, these overheads can be no joke. However, for ma
 
 The use of `fork()`, which this crate uses under the hood, has a slew of potentially dangerous side effects if you're not careful.
 
-* **Signals** delivered to the parent process won't be automatically forwarded to the child process running your `callable` during its execution.
 * For **single-threaded use only:** It is generally unsound to `fork()` in multi-threaded environments, especially when mutexes are involved. Only the thread that calls `fork()` will be cloned and live on in the new process. This can easily lead to deadlocks and hung child processes if other threads are holding resource locks that the child process expects to acquire.
+* **Signals** delivered to the parent process won't be automatically forwarded to the child process running your `callable` during its execution. See one of the `examples/blocking-signals-*` files for [an example](examples/blocking-signals-minimal.rs) of how to handle this.
 * **[Channels](https://doc.rust-lang.org/std/sync/mpsc/fn.channel.html)** can't be used to communicate between the parent and child processes. Consider using shared mmaps, pipes, or the filesystem instead.
 * **Shared mmaps** break the isolation guarantees of this crate. The child process will be able to mutate `mmap(..., MAP_SHARED, ...)` regions created by the parent process.
 * **Panics** in your `callable` won't panic the rest of your program, as they would without `mem-isolate`. That's as useful as it is harmful, depending on your use case, but it's worth noting.
