@@ -25,23 +25,61 @@
 //!   an isolated process.
 //! * [`MemIsolateError`] - The error type that function returns ☝️
 //!
-//! For more code examples, see [`examples/`](https://github.com/brannondorsey/mem-isolate/tree/main/examples).
-//! [This one](https://github.com/brannondorsey/mem-isolate/blob/main/examples/error-handling-basic.rs)
+//! For more code examples, see
+//! [`examples/`](https://github.com/brannondorsey/mem-isolate/tree/main/examples).
+//! [This
+//! one](https://github.com/brannondorsey/mem-isolate/blob/main/examples/error-handling-basic.rs)
 //! in particular shows how you should think about error handling.
 //!
-//! For more information, see the [README](https://github.com/brannondorsey/mem-isolate).
-//!
-//! ## Supported Platforms
-//!
-//! Because of its heavy use of POSIX system calls, this crate only
-//! supports Unix-like operating systems (e.g. Linux, macOS, BSD).
-//!
-//! Windows and wasm support are not planned at this time.
+//! For more information, see the
+//! [README](https://github.com/brannondorsey/mem-isolate).
 //!
 //! ## Limitations
 //!
-//! There are a whole host of things that can go wrong, or surprise you, when `fork()` is used. See the
-//! [README](https://github.com/brannondorsey/mem-isolate/blob/main/README.md#limitations) for more details.
+//! #### Performance & Usability
+//!
+//! * Works only on POSIX systems (Linux, macOS, BSD)
+//! * Data returned from the `callable` function must be serialized to and from
+//!   the child process (using `serde`), which can be expensive for large data.
+//! * Excluding serialization/deserialization cost,
+//!   `execute_in_isolated_process()` introduces runtime overhead on the order
+//!   of ~1ms compared to a direct invocation of the `callable`.
+//!
+//! In performance-critical systems, these overheads can be no joke. However,
+//! for many use cases, this is an affordable trade-off for the memory safety
+//! and snapshotting behavior that `mem-isolate` provides.
+//!
+//! #### Safety & Correctness
+//!
+//! The use of `fork()`, which this crate uses under the hood, has a slew of
+//! potentially dangerous side effects and surprises if you're not careful.
+//!
+//! * For **single-threaded use only:** It is generally unsound to `fork()` in
+//!   multi-threaded environments, especially when mutexes are involved. Only
+//!   the thread that calls `fork()` will be cloned and live on in the new
+//!   process. This can easily lead to deadlocks and hung child processes if
+//!   other threads are holding resource locks that the child process expects to
+//!   acquire.
+//! * **Signals** delivered to the parent process won't be automatically
+//!   forwarded to the child process running your `callable` during its
+//!   execution. See one of the `examples/blocking-signals-*` files for [an
+//!   example](https://github.com/brannondorsey/mem-isolate/blob/main/examples/blocking-signals-minimal.rs)
+//!   of how to handle this.
+//! * **[Channels](https://doc.rust-lang.org/std/sync/mpsc/fn.channel.html)**
+//!   can't be used to communicate between the parent and child processes.
+//!   Consider using shared mmaps, pipes, or the filesystem instead.
+//! * **Shared mmaps** break the isolation guarantees of this crate. The child
+//!   process will be able to mutate `mmap(..., MAP_SHARED, ...)` regions
+//!   created by the parent process.
+//! * **Panics** in your `callable` won't panic the rest of your program, as
+//!   they would without `mem-isolate`. That's as useful as it is harmful,
+//!   depending on your use case, but it's worth noting.
+//! * **Mutable references, static variables, and raw pointers** accessible to
+//!   your `callable` won't be modified as you would expect them to. That's kind
+//!   of the whole point of this crate... ;)
+//!
+//! Failing to understand or respect these limitations will make your code more
+//! susceptible to both undefined behavior (UB) and heap corruption, not less.
 //!
 //! ## Feature Flags
 //!
@@ -50,13 +88,15 @@
 //! are available:
 //!
 //! * `tracing`: Enable [tracing](https://docs.rs/tracing) instrumentation.
-//!   Instruments all high-level functions in [`lib.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/src/lib.rs) and creates spans for
-//!   child and parent processes in [`execute_in_isolated_process`]. Events are
-//!   mostly `debug!` and `error!` level. See [`examples/tracing.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/examples/tracing.rs)
+//!   Instruments all high-level functions in
+//!   [`lib.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/src/lib.rs)
+//!   and creates spans for child and parent processes in
+//!   [`execute_in_isolated_process`]. Events are mostly `debug!` and `error!`
+//!   level. See
+//!   [`examples/tracing.rs`](https://github.com/brannondorsey/mem-isolate/blob/main/examples/tracing.rs)
 //!   for an example.
 //!
 //! By default, no additional features are enabled.
-//!
 #![warn(missing_docs)]
 #![warn(clippy::pedantic, clippy::unwrap_used)]
 #![warn(missing_debug_implementations)]
@@ -133,16 +173,6 @@ const HIGHEST_LEVEL: Level = Level::ERROR;
 /// // However, the memory is not leaked in the parent process here
 /// ```
 ///
-/// # Safety
-///
-/// Because this function calls `fork()`, it should only be used in single-threaded
-/// environments (unless you know what you're doing).
-///
-/// Additionally, if your code has any mutable references, static variables, or
-/// raw pointers, those will not be modified as you might expect. See the
-/// [**Limitations** section](https://github.com/brannondorsey/mem-isolate/blob/main/README.md#limitations)
-/// of the README for more details.
-///
 /// # Errors
 ///
 /// Error handling is organized into three levels:
@@ -185,12 +215,13 @@ const HIGHEST_LEVEL: Level = Level::ERROR;
 /// For a more detailed look at error handling, see the documentation in the
 /// [`errors`] module.
 ///
-/// ## Important Note on Closures
+/// # Important Note on Closures
 ///
-/// When using closures that capture and mutate variables from their environment,
-/// these mutations **only occur in the isolated child process** and do not affect
-/// the parent process's memory. For example, it may seem surprising that the
-/// following code will leave the parent's `counter` variable unchanged:
+/// When using closures that capture and mutate variables from their
+/// environment, these mutations **only occur in the isolated child process**
+/// and do not affect the parent process's memory. For example, it may seem
+/// surprising that the following code will leave the parent's `counter`
+/// variable unchanged:
 ///
 /// ```rust
 /// use mem_isolate::execute_in_isolated_process;
@@ -206,6 +237,53 @@ const HIGHEST_LEVEL: Level = Level::ERROR;
 /// This is the intended behavior as the function's purpose is to isolate all
 /// memory effects of the callable. However, this can be surprising, especially
 /// for [`FnMut`] or [`FnOnce`] closures.
+///
+/// # Limitations
+///
+/// #### Performance & Usability
+///
+/// * Works only on POSIX systems (Linux, macOS, BSD)
+/// * Data returned from the `callable` function must be serialized to and from
+///   the child process (using `serde`), which can be expensive for large data.
+/// * Excluding serialization/deserialization cost,
+///   `execute_in_isolated_process()` introduces runtime overhead on the order
+///   of ~1ms compared to a direct invocation of the `callable`.
+///
+/// In performance-critical systems, these overheads can be no joke. However,
+/// for many use cases, this is an affordable trade-off for the memory safety
+/// and snapshotting behavior that `mem-isolate` provides.
+///
+/// #### Safety & Correctness
+///
+/// The use of `fork()`, which this crate uses under the hood, has a slew of
+/// potentially dangerous side effects and surprises if you're not careful.
+///
+/// * For **single-threaded use only:** It is generally unsound to `fork()` in
+///   multi-threaded environments, especially when mutexes are involved. Only
+///   the thread that calls `fork()` will be cloned and live on in the new
+///   process. This can easily lead to deadlocks and hung child processes if
+///   other threads are holding resource locks that the child process expects to
+///   acquire.
+/// * **Signals** delivered to the parent process won't be automatically
+///   forwarded to the child process running your `callable` during its
+///   execution. See one of the `examples/blocking-signals-*` files for [an
+///   example](https://github.com/brannondorsey/mem-isolate/blob/main/) of how
+///   to handle this.
+/// * **[Channels](https://doc.rust-lang.org/std/sync/mpsc/fn.channel.html)**
+///   can't be used to communicate between the parent and child processes.
+///   Consider using shared mmaps, pipes, or the filesystem instead.
+/// * **Shared mmaps** break the isolation guarantees of this crate. The child
+///   process will be able to mutate `mmap(..., MAP_SHARED, ...)` regions
+///   created by the parent process.
+/// * **Panics** in your `callable` won't panic the rest of your program, as
+///   they would without `mem-isolate`. That's as useful as it is harmful,
+///   depending on your use case, but it's worth noting.
+/// * **Mutable references, static variables, and raw pointers** accessible to
+///   your `callable` won't be modified as you would expect them to. That's kind
+///   of the whole point of this crate... ;)
+///
+/// Failing to understand or respect these limitations will make your code more
+/// susceptible to both undefined behavior (UB) and heap corruption, not less.
 #[cfg_attr(feature = "tracing", instrument(skip(callable)))]
 pub fn execute_in_isolated_process<F, T>(callable: F) -> Result<T, MemIsolateError>
 where

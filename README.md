@@ -64,7 +64,7 @@ In performance-critical systems, these overheads can be no joke. However, for ma
 
 ### Safety & Correctness
 
-The use of `fork()`, which this crate uses under the hood, has a slew of potentially dangerous side effects if you're not careful.
+The use of `fork()`, which this crate uses under the hood, has a slew of potentially dangerous side effects and surprises if you're not careful.
 
 * For **single-threaded use only:** It is generally unsound to `fork()` in multi-threaded environments, especially when mutexes are involved. Only the thread that calls `fork()` will be cloned and live on in the new process. This can easily lead to deadlocks and hung child processes if other threads are holding resource locks that the child process expects to acquire.
 * **Signals** delivered to the parent process won't be automatically forwarded to the child process running your `callable` during its execution. See one of the `examples/blocking-signals-*` files for [an example](examples/blocking-signals-minimal.rs) of how to handle this.
