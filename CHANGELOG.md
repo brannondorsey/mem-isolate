@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4](https://github.com/brannondorsey/mem-isolate/compare/v0.1.3...v0.1.4) - 2025-04-15
+
+### Other
+
+- Include discussion section in README with links to Hacker News and Reddit posts ([#47](https://github.com/brannondorsey/mem-isolate/pull/47))
+- Clarify safety claims and stress limitations in README and module documentation ([#44](https://github.com/brannondorsey/mem-isolate/pull/44))
+- Add examples illustrating how to block and restore signals around mem-isolate calls ([#45](https://github.com/brannondorsey/mem-isolate/pull/45))
+
 ## [0.1.3](https://github.com/brannondorsey/mem-isolate/compare/v0.1.2...v0.1.3) - 2025-04-05
 
 ### Fixed
