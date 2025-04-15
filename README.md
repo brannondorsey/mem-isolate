@@ -129,3 +129,9 @@ at your option.
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in the work by you shall be dual licensed as above, without any
 additional terms or conditions.
+
+## Discussion
+
+This crate was previously discussed on [Hacker News](https://news.ycombinator.com/item?id=43601301) and [Reddit](https://www.reddit.com/r/rust/comments/1jsu2i2/run_unsafe_code_safely_using_memisolate/) 🧵
+
+Version [0.1.4](https://github.com/brannondorsey/mem-isolate/releases/tag/v0.1.4) included changes to the documentation and messaging around the limitations and appropriate use cases for this crate based on feedback from these discussions. Thanks everyone!
