@@ -284,7 +284,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "No mock behavior configured for fork()")]
     fn missing_fork_expectation() {
         let mock = MockableSystemFunctions::with_fallback();
@@ -298,7 +299,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "No mock behavior configured for pipe()")]
     fn missing_pipe_expectation() {
         let mock = MockableSystemFunctions::with_fallback();
@@ -310,7 +312,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "No mock behavior configured for close()")]
     fn missing_close_expectation() {
         let mock = MockableSystemFunctions::with_fallback();
@@ -322,7 +325,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "No mock behavior configured for waitpid()")]
     fn missing_waitpid_expectation() {
         let mock = MockableSystemFunctions::with_fallback();
@@ -334,7 +338,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "_exit(0) called in mock context")]
     fn exit_in_mock_context() {
         let mock = MockableSystemFunctions::with_fallback();
@@ -348,7 +353,8 @@ mod tests {
         // WARNING: No disable_mocking() here because its unreachable
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn multiple_expectations() {
         let mock = MockableSystemFunctions::with_fallback();
 
@@ -367,7 +373,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn non_os_error_handling() {
         // Create a special io::Error that's not an OS error
         let custom_error = io::Error::new(io::ErrorKind::Other, "Custom error");
@@ -387,7 +394,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn mixed_real_and_mock_calls() {
         with_mock_system(
             configured_with_fallback(|mock| {

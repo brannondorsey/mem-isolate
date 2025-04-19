@@ -411,7 +411,8 @@ fn parent_pipe_close_failure() {
 }
 
 // // TODO: Come back and fix this test.
-// #[test]
+// #[rstest]
+// #[timeout(TEST_TIMEOUT)]
 // fn parent_pipe_reader_invalid() {
 //     use crate::c::PipeFds;
 
@@ -509,7 +510,8 @@ fn waitpid_child_killed_by_signal() {
     ));
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 #[allow(clippy::semicolon_if_nothing_returned)]
 fn waitpid_child_killed_by_signal_after_suspension_and_continuation() {
     let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
