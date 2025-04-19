@@ -53,6 +53,10 @@ jobs:
         # Test can't be run with --no-dev-deps
         run: cargo hack test --feature-powerset
 
-      # Finally, lets not be sloppy
+      # Run clippy treating warnings as errors
       - name: Clippy
-        run: cargo hack clippy --feature-powerset --no-dev-deps
+        run: cargo hack clippy --feature-powerset --no-dev-deps -- -D warnings
+
+      # Check formatting
+      - name: Format
+        run: cargo fmt --all --check
