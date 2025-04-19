@@ -467,7 +467,7 @@ fn waitpid_child_process_exited_on_its_own() {
 }
 
 #[rstest]
-#[timeout(TEST_TIMEOUT)]
+#[timeout(Duration::from_secs(3))]
 #[allow(clippy::semicolon_if_nothing_returned)]
 fn waitpid_child_killed_by_signal() {
     let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
@@ -511,7 +511,7 @@ fn waitpid_child_killed_by_signal() {
 }
 
 #[rstest]
-#[timeout(TEST_TIMEOUT)]
+#[timeout(Duration::from_secs(3))]
 #[allow(clippy::semicolon_if_nothing_returned)]
 fn waitpid_child_killed_by_signal_after_suspension_and_continuation() {
     let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
