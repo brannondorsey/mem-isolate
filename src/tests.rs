@@ -8,6 +8,7 @@ use crate::c::mock::{
 use errors::CallableDidNotExecuteError;
 use errors::CallableExecutedError;
 use errors::CallableStatusUnknownError;
+use rstest::*;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
@@ -19,6 +20,8 @@ use std::thread;
 use std::time;
 use std::time::Duration;
 use tempfile::NamedTempFile;
+
+pub(crate) const TEST_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct MyResult {
@@ -84,13 +87,15 @@ fn before_tests() {
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn simple_example() {
     let result = execute_in_isolated_process(|| MyResult { value: 42 }).unwrap();
     assert_eq!(result, MyResult { value: 42 });
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 #[allow(static_mut_refs)]
 fn static_memory_mutation_without_isolation() {
     static mut MEMORY: bool = false;
@@ -105,7 +110,8 @@ fn static_memory_mutation_without_isolation() {
     }
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 #[allow(static_mut_refs)]
 fn static_memory_mutation_with_isolation() {
     static mut MEMORY: bool = false;
@@ -123,7 +129,8 @@ fn static_memory_mutation_with_isolation() {
     }
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn isolate_memory_leak() {
     fn check_memory_exists_and_holds_vec_data(ptr_str: &str) -> bool {
         let addr = usize::from_str_radix(ptr_str.trim_start_matches("0x"), 16).unwrap();
@@ -171,7 +178,8 @@ fn isolate_memory_leak() {
     );
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn all_function_types() {
     // 1. Function pointer (simplest, most explicit)
     fn function_pointer() -> MyResult {
@@ -210,7 +218,8 @@ fn all_function_types() {
     assert_eq!(result, MyResult { value: 5 });
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn serialization_error() {
     // Custom type that implements Serialize but fails during serialization
     #[derive(Debug)]
@@ -253,7 +262,8 @@ fn serialization_error() {
     }
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn deserialization_error() {
     // Custom type that successfully serializes but fails during deserialization
     #[derive(Debug, PartialEq)]
@@ -300,7 +310,8 @@ fn deserialization_error() {
     }
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn with_mock_helper() {
     with_mock_system(MockConfig::Fallback, |_| {
         // Test with active mocking
@@ -316,7 +327,8 @@ fn with_mock_helper() {
     assert!(!is_mocking_enabled());
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn pipe_error() {
     with_mock_system(
         // Pipe creation is the first syscall in execute_in_isolated_process so we can afford
@@ -344,7 +356,8 @@ fn pipe_error() {
     );
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn fork_error() {
     with_mock_system(
         configured_with_fallback(|mock| {
@@ -368,7 +381,8 @@ fn fork_error() {
     );
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn parent_pipe_close_failure() {
     with_mock_system(
         configured_with_fallback(|mock| {
@@ -397,7 +411,8 @@ fn parent_pipe_close_failure() {
 }
 
 // // TODO: Come back and fix this test.
-// #[test]
+// #[rstest]
+// #[timeout(TEST_TIMEOUT)]
 // fn parent_pipe_reader_invalid() {
 //     use crate::c::PipeFds;
 
@@ -444,13 +459,15 @@ fn parent_pipe_close_failure() {
 //     );
 // }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn waitpid_child_process_exited_on_its_own() {
     // The default case
     execute_in_isolated_process(|| {}).unwrap();
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 #[allow(clippy::semicolon_if_nothing_returned)]
 fn waitpid_child_killed_by_signal() {
     let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
@@ -493,7 +510,8 @@ fn waitpid_child_killed_by_signal() {
     ));
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 #[allow(clippy::semicolon_if_nothing_returned)]
 fn waitpid_child_killed_by_signal_after_suspension_and_continuation() {
     let tmp_file = NamedTempFile::new().expect("Failed to create temp file");
@@ -546,7 +564,8 @@ fn waitpid_child_killed_by_signal_after_suspension_and_continuation() {
     ));
 }
 
-#[test]
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn waitpid_interrupted_by_signal_mock() {
     with_mock_system(
         configured_with_fallback(|mock| {

@@ -33,6 +33,7 @@ criterion = "0.5.1"
 ctor = "0.4.1"
 nix = { version = "0.29.0", features = ["signal"] }
 rand = "0.9.0"
+rstest = { version = "0.25.0", default-features = false }
 tempfile = "3.18.0"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 

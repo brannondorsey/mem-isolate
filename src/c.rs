@@ -111,10 +111,13 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+    use crate::tests::TEST_TIMEOUT;
     use mock::*;
+    use rstest::*;
     use std::io;
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn mock_enabling_disabling() {
         assert!(!is_mocking_enabled());
 
@@ -126,7 +129,9 @@ mod tests {
         assert!(!is_mocking_enabled());
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
+
     fn with_mock_system_helper() {
         assert!(!is_mocking_enabled());
         with_mock_system(MockConfig::Fallback, |_| {
@@ -135,7 +140,8 @@ mod tests {
         assert!(!is_mocking_enabled());
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "No mock behavior configured for fork() and fallback is disabled")]
     fn stict_mocking_panics_when_no_mock_is_configured() {
         let mock = MockableSystemFunctions::strict();
@@ -144,7 +150,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "No mock behavior configured for fork() and fallback is disabled")]
     fn strict_mocking_panics_when_no_mock_is_configured_with_system_helper() {
         assert!(!is_mocking_enabled());
@@ -154,7 +161,8 @@ mod tests {
         assert!(!is_mocking_enabled());
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "No mock behavior configured for fork() and fallback is disabled")]
     fn strict_mocking_panics_when_no_mock_is_configured_with_system_helper_configured_strict() {
         assert!(!is_mocking_enabled());
@@ -164,7 +172,8 @@ mod tests {
         assert!(!is_mocking_enabled());
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn fork_mocking() {
         use CallBehavior::Mock;
 
@@ -182,7 +191,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn pipe_mocking() {
         with_mock_system(
             configured_strict(|mock| {
@@ -205,7 +215,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn close_mocking() {
         let mock = MockableSystemFunctions::strict();
         mock.expect_close(CallBehavior::Mock(Ok(())));
@@ -218,7 +229,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn waitpid_mocking() {
         let mock = MockableSystemFunctions::strict();
         mock.expect_waitpid(CallBehavior::Mock(Ok(42)));
@@ -231,7 +243,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn error_conditions() {
         use CallBehavior::Mock;
 
@@ -271,7 +284,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "No mock behavior configured for fork()")]
     fn missing_fork_expectation() {
         let mock = MockableSystemFunctions::with_fallback();
@@ -285,7 +299,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "No mock behavior configured for pipe()")]
     fn missing_pipe_expectation() {
         let mock = MockableSystemFunctions::with_fallback();
@@ -297,7 +312,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "No mock behavior configured for close()")]
     fn missing_close_expectation() {
         let mock = MockableSystemFunctions::with_fallback();
@@ -309,7 +325,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "No mock behavior configured for waitpid()")]
     fn missing_waitpid_expectation() {
         let mock = MockableSystemFunctions::with_fallback();
@@ -321,7 +338,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     #[should_panic(expected = "_exit(0) called in mock context")]
     fn exit_in_mock_context() {
         let mock = MockableSystemFunctions::with_fallback();
@@ -335,7 +353,8 @@ mod tests {
         // WARNING: No disable_mocking() here because its unreachable
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn multiple_expectations() {
         let mock = MockableSystemFunctions::with_fallback();
 
@@ -354,7 +373,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn non_os_error_handling() {
         // Create a special io::Error that's not an OS error
         let custom_error = io::Error::new(io::ErrorKind::Other, "Custom error");
@@ -374,7 +394,8 @@ mod tests {
         disable_mocking();
     }
 
-    #[test]
+    #[rstest]
+    #[timeout(TEST_TIMEOUT)]
     fn mixed_real_and_mock_calls() {
         with_mock_system(
             configured_with_fallback(|mock| {
