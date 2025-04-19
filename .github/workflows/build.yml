@@ -51,7 +51,7 @@ jobs:
       # Proper exhaustive testing
       - name: Test
         # Test can't be run with --no-dev-deps
-        run: cargo hack test --feature-powerset
+        run: cargo hack test --feature-powerset -- --test-threads=1
 
       # Run clippy treating warnings as errors
       - name: Clippy
