@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5](https://github.com/brannondorsey/mem-isolate/compare/v0.1.4...v0.1.5) - 2025-04-20
+
+### Fixed
+
+- *(ci)* Add 1 second default timeouts to all tests ([#50](https://github.com/brannondorsey/mem-isolate/pull/50))
+
+### Other
+
+- Bump test timeouts for two tests that just timed out ([#53](https://github.com/brannondorsey/mem-isolate/pull/53))
+
 ## [0.1.4](https://github.com/brannondorsey/mem-isolate/compare/v0.1.3...v0.1.4) - 2025-04-15
 
 ### Other
