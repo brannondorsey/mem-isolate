@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5](https://github.com/brannondorsey/mem-isolate/compare/v0.1.4...v0.1.5) - 2025-04-20
+
+### Fixed
+
+- Run tests with one thread only as a fix for flaky tests that hang indefinitely ([#49](https://github.com/brannondorsey/mem-isolate/pull/49)). See [#52](https://github.com/brannondorsey/mem-isolate/pull/52) for how we tested this fix.
+
+### Other
+
+- Add 1 second default timeouts to all tests ([#50](https://github.com/brannondorsey/mem-isolate/pull/50))
+- Bump test timeouts for two flaky tests ([#53](https://github.com/brannondorsey/mem-isolate/pull/53))
+- Error on clippy warnings and check formatting in CI ([#48](https://github.com/brannondorsey/mem-isolate/pull/48))
+
 ## [0.1.4](https://github.com/brannondorsey/mem-isolate/compare/v0.1.3...v0.1.4) - 2025-04-15
 
 ### Other
