@@ -298,6 +298,10 @@ where
 
     match fork(&sys)? {
         ForkReturn::Child => {
+            #[cfg(test)]
+            // Disable mocking in the child process, fixes test failures on macOS
+            c::mock::disable_mocking();
+
             #[cfg(feature = "tracing")]
             let _child_span = {
                 std::mem::drop(parent_span);
@@ -321,10 +325,13 @@ where
         ForkReturn::Parent(child_pid) => {
             close_write_end_of_pipe_in_parent(&sys, write_fd)?;
 
+            // Read the data from the pipe before waiting for the child to exit
+            // to prevent deadlocks.
+            let buffer: Vec<u8> = read_all_of_child_result_pipe(read_fd)?;
+
             let waitpid_bespoke_status = wait_for_child(&sys, child_pid)?;
             error_if_child_unhappy(waitpid_bespoke_status)?;
 
-            let buffer: Vec<u8> = read_all_of_child_result_pipe(read_fd)?;
             deserialize_result(&buffer)
         }
     }
@@ -553,13 +560,6 @@ fn read_all_of_child_result_pipe(read_fd: c_int) -> Result<Vec<u8>, MemIsolateEr
             return Err(err);
         }
     } // The read_fd will automatically be closed when the File is dropped
-
-    if buffer.is_empty() {
-        // TODO: How can we more rigorously know this? Maybe we write to a mem map before and after execution?
-        let err = CallableStatusUnknown(CallableProcessDiedDuringExecution);
-        error!("buffer unexpectedly empty, propagating {:?}", err);
-        return Err(err);
-    }
 
     debug!("successfully read {} bytes from pipe", buffer.len());
     Ok(buffer)
