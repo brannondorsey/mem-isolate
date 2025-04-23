@@ -335,7 +335,7 @@ where
             // Defer the buffer emptiness check until after the waitpid to preserve
             // the behavior that child processes that panic will result in a
             // CallableProcessDiedDuringExecution error.
-            check_buffer_is_not_empty(&buffer)?;
+            error_if_buffer_is_empty(&buffer)?;
             deserialize_result(&buffer)
         }
     }
@@ -570,7 +570,7 @@ fn read_all_of_child_result_pipe(read_fd: c_int) -> Result<Vec<u8>, MemIsolateEr
 }
 
 #[cfg_attr(feature = "tracing", instrument)]
-fn check_buffer_is_not_empty(buffer: &[u8]) -> Result<(), MemIsolateError> {
+fn error_if_buffer_is_empty(buffer: &[u8]) -> Result<(), MemIsolateError> {
     if buffer.is_empty() {
         let err = CallableStatusUnknown(CallableProcessDiedDuringExecution);
         error!("buffer unexpectedly empty, propagating {:?}", err);
