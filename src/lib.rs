@@ -431,6 +431,7 @@ fn wait_for_child<S: SystemFunctions>(
 fn error_if_child_unhappy(waitpid_bespoke_status: WaitpidStatus) -> Result<(), MemIsolateError> {
     let result = if let Some(exit_status) = child_process_exited_on_its_own(waitpid_bespoke_status)
     {
+        debug!("child process exited with status: {}", exit_status);
         match exit_status {
             CHILD_EXIT_HAPPY => Ok(()),
             CHILD_EXIT_IF_READ_CLOSE_FAILED => {
