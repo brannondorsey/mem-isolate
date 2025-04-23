@@ -222,10 +222,28 @@ fn all_function_types() {
 #[timeout(TEST_TIMEOUT)]
 fn handle_large_result() {
     let initial_string = "The quick brown fox jumps over the lazy dog";
-    let result = execute_in_isolated_process(|| {
-        initial_string.repeat(10000)
-    }).unwrap();
+    let result = execute_in_isolated_process(|| initial_string.repeat(10000)).unwrap();
     assert_eq!(result.len(), 10000 * initial_string.len());
+}
+
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
+fn panic_in_child() {
+    #[allow(clippy::semicolon_if_nothing_returned)]
+    let error = execute_in_isolated_process(|| {
+        panic!("Panic in child");
+        #[allow(clippy::unused_unit)]
+        #[allow(unreachable_code)]
+        ()
+    })
+    .unwrap_err();
+    eprintln!("error: {error:?}",);
+    assert!(matches!(
+        error,
+        MemIsolateError::CallableStatusUnknown(
+            CallableStatusUnknownError::CallableProcessDiedDuringExecution
+        )
+    ));
 }
 
 #[rstest]
