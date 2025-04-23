@@ -223,6 +223,9 @@ fn all_function_types() {
 fn panic_in_child() {
     #[allow(clippy::semicolon_if_nothing_returned)]
     let error = execute_in_isolated_process(|| {
+        // TODO: Figure out why this casues the child process to exit happily on its own
+        // if buffer.is_empty() check is removed (resulting in a deserialization error)
+        // Shouldn't the waitpid check result in noticing that the child panicked?
         panic!("Panic in child");
         #[allow(clippy::unused_unit)]
         #[allow(unreachable_code)]
@@ -236,6 +239,13 @@ fn panic_in_child() {
             CallableStatusUnknownError::CallableProcessDiedDuringExecution
         )
     ));
+}
+
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
+#[allow(clippy::unit_cmp)]
+fn empty_result() {
+    assert_eq!(execute_in_isolated_process(|| {}).unwrap(), ());
 }
 
 #[rstest]
