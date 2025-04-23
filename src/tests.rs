@@ -220,6 +220,26 @@ fn all_function_types() {
 
 #[rstest]
 #[timeout(TEST_TIMEOUT)]
+fn panic_in_child() {
+    #[allow(clippy::semicolon_if_nothing_returned)]
+    let error = execute_in_isolated_process(|| {
+        panic!("Panic in child");
+        #[allow(clippy::unused_unit)]
+        #[allow(unreachable_code)]
+        ()
+    })
+    .unwrap_err();
+    eprintln!("error: {error:?}",);
+    assert!(matches!(
+        error,
+        MemIsolateError::CallableStatusUnknown(
+            CallableStatusUnknownError::CallableProcessDiedDuringExecution
+        )
+    ));
+}
+
+#[rstest]
+#[timeout(TEST_TIMEOUT)]
 fn serialization_error() {
     // Custom type that implements Serialize but fails during serialization
     #[derive(Debug)]
