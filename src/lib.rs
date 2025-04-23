@@ -332,6 +332,10 @@ where
             let waitpid_bespoke_status = wait_for_child(&sys, child_pid)?;
             error_if_child_unhappy(waitpid_bespoke_status)?;
 
+            // Defer the buffer emptiness check until after the waitpid to preserve
+            // the behavior that child processes that panic will result in a
+            // CallableProcessDiedDuringExecution error.
+            check_buffer_is_not_empty(&buffer)?;
             deserialize_result(&buffer)
         }
     }
@@ -561,9 +565,18 @@ fn read_all_of_child_result_pipe(read_fd: c_int) -> Result<Vec<u8>, MemIsolateEr
             return Err(err);
         }
     } // The read_fd will automatically be closed when the File is dropped
-
     debug!("successfully read {} bytes from pipe", buffer.len());
     Ok(buffer)
+}
+
+#[cfg_attr(feature = "tracing", instrument)]
+fn check_buffer_is_not_empty(buffer: &[u8]) -> Result<(), MemIsolateError> {
+    if buffer.is_empty() {
+        let err = CallableStatusUnknown(CallableProcessDiedDuringExecution);
+        error!("buffer unexpectedly empty, propagating {:?}", err);
+        return Err(err);
+    }
+    Ok(())
 }
 
 #[cfg_attr(feature = "tracing", instrument)]
