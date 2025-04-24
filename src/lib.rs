@@ -326,8 +326,9 @@ where
             close_write_end_of_pipe_in_parent(&sys, write_fd)?;
 
             // Read the data from the pipe before waiting for the child to exit
-            // to prevent deadlocks.
-            let buffer: Vec<u8> = read_all_of_child_result_pipe(read_fd)?;
+            // to prevent deadlocks. Don't bubble up errors before the waitpid
+            // to avoid creating zombie processes.
+            let pipe_result = read_all_of_child_result_pipe(read_fd);
 
             let waitpid_bespoke_status = wait_for_child(&sys, child_pid)?;
             error_if_child_unhappy(waitpid_bespoke_status)?;
@@ -335,6 +336,7 @@ where
             // Defer the buffer emptiness check until after the waitpid to preserve
             // the behavior that child processes that panic will result in a
             // CallableProcessDiedDuringExecution error.
+            let buffer = pipe_result?;
             error_if_buffer_is_empty(&buffer)?;
             deserialize_result(&buffer)
         }
