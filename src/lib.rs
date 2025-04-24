@@ -298,6 +298,10 @@ where
 
     match fork(&sys)? {
         ForkReturn::Child => {
+            #[cfg(test)]
+            // Disable mocking in the child process, fixes test failures on macOS
+            c::mock::disable_mocking();
+
             #[cfg(feature = "tracing")]
             let _child_span = {
                 std::mem::drop(parent_span);
@@ -321,10 +325,19 @@ where
         ForkReturn::Parent(child_pid) => {
             close_write_end_of_pipe_in_parent(&sys, write_fd)?;
 
+            // Read the data from the pipe before waiting for the child to exit
+            // to prevent deadlocks. Don't bubble up errors before the waitpid
+            // to avoid creating zombie processes.
+            let pipe_result = read_all_of_child_result_pipe(read_fd);
+
             let waitpid_bespoke_status = wait_for_child(&sys, child_pid)?;
             error_if_child_unhappy(waitpid_bespoke_status)?;
 
-            let buffer: Vec<u8> = read_all_of_child_result_pipe(read_fd)?;
+            // Defer the buffer emptiness check until after the waitpid to preserve
+            // the behavior that child processes that panic will result in a
+            // CallableProcessDiedDuringExecution error.
+            let buffer = pipe_result?;
+            error_if_buffer_is_empty(&buffer)?;
             deserialize_result(&buffer)
         }
     }
@@ -424,6 +437,7 @@ fn wait_for_child<S: SystemFunctions>(
 fn error_if_child_unhappy(waitpid_bespoke_status: WaitpidStatus) -> Result<(), MemIsolateError> {
     let result = if let Some(exit_status) = child_process_exited_on_its_own(waitpid_bespoke_status)
     {
+        debug!("child process exited with status: {}", exit_status);
         match exit_status {
             CHILD_EXIT_HAPPY => Ok(()),
             CHILD_EXIT_IF_READ_CLOSE_FAILED => {
@@ -553,16 +567,18 @@ fn read_all_of_child_result_pipe(read_fd: c_int) -> Result<Vec<u8>, MemIsolateEr
             return Err(err);
         }
     } // The read_fd will automatically be closed when the File is dropped
+    debug!("successfully read {} bytes from pipe", buffer.len());
+    Ok(buffer)
+}
 
+#[cfg_attr(feature = "tracing", instrument)]
+fn error_if_buffer_is_empty(buffer: &[u8]) -> Result<(), MemIsolateError> {
     if buffer.is_empty() {
-        // TODO: How can we more rigorously know this? Maybe we write to a mem map before and after execution?
         let err = CallableStatusUnknown(CallableProcessDiedDuringExecution);
         error!("buffer unexpectedly empty, propagating {:?}", err);
         return Err(err);
     }
-
-    debug!("successfully read {} bytes from pipe", buffer.len());
-    Ok(buffer)
+    Ok(())
 }
 
 #[cfg_attr(feature = "tracing", instrument)]
