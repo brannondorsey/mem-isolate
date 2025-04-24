@@ -298,15 +298,16 @@ where
 
     match fork(&sys)? {
         ForkReturn::Child => {
-            #[cfg(test)]
-            // Disable mocking in the child process, fixes test failures on macOS
-            c::mock::disable_mocking();
-
             #[cfg(feature = "tracing")]
             let _child_span = {
                 std::mem::drop(parent_span);
                 span!(HIGHEST_LEVEL, "child").entered()
             };
+
+            #[cfg(test)]
+            // Disable mocking in the child process, fixes test failures on macOS
+            c::mock::disable_mocking();
+
             // NOTE: Fallible actions in the child must either serialize
             // and send their error over the pipe, or exit with a code
             // that can be inerpreted by the parent.

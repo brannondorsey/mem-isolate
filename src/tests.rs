@@ -240,15 +240,23 @@ fn panic_in_child() {
         ()
     })
     .unwrap_err();
-    eprintln!("error: {error:?}",);
-    assert!(matches!(
-        error,
-        MemIsolateError::CallableStatusUnknown(
-            CallableStatusUnknownError::CallableProcessDiedDuringExecution
-        )
-    ));
+    eprintln!("error: {error:?}");
+    if cfg!(target_os = "macos") {
+        assert!(matches!(
+            error,
+            MemIsolateError::CallableStatusUnknown(
+                CallableStatusUnknownError::ChildProcessKilledBySignal(5),
+            )
+        ));
+    } else {
+        assert!(matches!(
+            error,
+            MemIsolateError::CallableStatusUnknown(
+                CallableStatusUnknownError::CallableProcessDiedDuringExecution,
+            )
+        ));
+    }
 }
-
 #[rstest]
 #[timeout(TEST_TIMEOUT)]
 #[allow(clippy::unit_cmp)]
