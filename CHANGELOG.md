@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6](https://github.com/brannondorsey/mem-isolate/compare/v0.1.5...v0.1.6) - 2025-04-24
+
+### Added
+
+- *(tests)* Run tests on MacOS in addition to Ubuntu ([#60](https://github.com/brannondorsey/mem-isolate/pull/60))
+
+### Fixed
+
+- Ensure large results are handled correctly ([#56](https://github.com/brannondorsey/mem-isolate/pull/56))
+
+### Other
+
+- Add empty test and TODO comment ([#59](https://github.com/brannondorsey/mem-isolate/pull/59))
+- Add test that covers the case when the user-defined callable panics ([#57](https://github.com/brannondorsey/mem-isolate/pull/57))
+
 ## [0.1.5](https://github.com/brannondorsey/mem-isolate/compare/v0.1.4...v0.1.5) - 2025-04-20
 
 ### Fixed
